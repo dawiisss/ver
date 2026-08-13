@@ -24,8 +24,11 @@ Cargo.lock
 *.rpm
 *.pkg.tar.*
 *.AppImage
+*.tar.gz
 appimagetool
 AppDir/
+staging/
+ver_*/
 pkg/
 builddir/
 *.so

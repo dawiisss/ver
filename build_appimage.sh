@@ -1,10 +1,13 @@
 #!/bin/bash
 set -e
 
-echo "Building Rust binary..."
-cargo build --release
+VERSION="${1:-1.0.0}"
+VERSION="${VERSION#v}"
+APP_NAME="ver"
+APPIMAGE_NAME="${APP_NAME}-${VERSION}-x86_64.AppImage"
 
-echo "Preparing AppDir..."
+echo "Preparing AppDir for $APPIMAGE_NAME..."
+rm -rf AppDir
 mkdir -p AppDir/usr/bin
 mkdir -p AppDir/usr/share/applications
 mkdir -p AppDir/usr/share/pixmaps
@@ -28,12 +31,14 @@ cp data/com.example.ver.png AppDir/
 
 echo "Downloading appimagetool if missing..."
 if [ ! -f "appimagetool" ]; then
+    wget -q https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage -O appimagetool || \
     wget -q https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage -O appimagetool
     chmod +x appimagetool
 fi
 
 echo "Building AppImage..."
-./appimagetool AppDir VER-x86_64.AppImage
+ARCH=x86_64 ./appimagetool --appimage-extract-and-run AppDir "$APPIMAGE_NAME"
 
 rm -rf AppDir
-echo "Done! Generated VER-x86_64.AppImage"
+echo "Done! Generated $APPIMAGE_NAME"
+

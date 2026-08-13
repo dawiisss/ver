@@ -1,37 +1,58 @@
 #!/bin/bash
 set -e
 
-echo "Building release binary..."
-cargo build --release
+VERSION="${1:-1.0.0}"
+VERSION="${VERSION#v}"
+APP_NAME="ver"
+PKG_DIR="$(mktemp -d)"
+PKG_TAR="${APP_NAME}-${VERSION}-1-x86_64.pkg.tar.zst"
 
-BUILD_TMP="$(mktemp -d)"
-ROOT_DIR="$(pwd)"
+echo "Building Arch Linux pacman package for version $VERSION..."
 
-cat << EOF > "$BUILD_TMP/PKGBUILD"
-pkgname=ver
-pkgver=1.0.0
-pkgrel=1
-pkgdesc="Very Easy Remote - A GTK4 Connection Manager"
-arch=('x86_64')
-url="https://github.com/dawiisss/ver"
-license=('GPL3')
-depends=('gtk4' 'libadwaita')
-source=()
+mkdir -p "$PKG_DIR/usr/bin"
+mkdir -p "$PKG_DIR/usr/share/applications"
+mkdir -p "$PKG_DIR/usr/share/pixmaps"
 
-package() {
-  install -Dm755 "$ROOT_DIR/target/release/beautiful-goodall" "\$pkgdir/usr/bin/ver"
-  install -Dm644 "$ROOT_DIR/data/com.example.ver.desktop" "\$pkgdir/usr/share/applications/com.example.ver.desktop"
-  install -Dm644 "$ROOT_DIR/data/com.example.ver.png" "\$pkgdir/usr/share/pixmaps/com.example.ver.png"
-}
+cp target/release/beautiful-goodall "$PKG_DIR/usr/bin/ver"
+cp data/com.example.ver.desktop "$PKG_DIR/usr/share/applications/"
+cp data/com.example.ver.png "$PKG_DIR/usr/share/pixmaps/"
+
+SIZE=$(du -sb "$PKG_DIR/usr" | awk '{print $1}')
+BUILD_DATE=$(date +%s)
+
+cat << EOF > "$PKG_DIR/.PKGINFO"
+pkgname = ver
+pkgbase = ver
+pkgver = ${VERSION}-1
+pkgdesc = Very Easy Remote - A GTK4 Connection Manager
+url = https://github.com/dawiisss/ver
+builddate = $BUILD_DATE
+packager = VER Team
+size = $SIZE
+arch = x86_64
+license = GPL3
+depend = gtk4
+depend = libadwaita
 EOF
 
-echo "Building pacman package using makepkg in isolated directory..."
+cat << EOF > "$PKG_DIR/.BUILDINFO"
+format = 2
+pkgname = ver
+pkgver = ${VERSION}-1
+pkgarch = x86_64
+pkgbuild_sha256sum = 0000000000000000000000000000000000000000000000000000000000000000
+packager = VER Team
+builddate = $BUILD_DATE
+buildenv = color
+EOF
+
 (
-  cd "$BUILD_TMP"
-  makepkg -f -d --nodeps
-  cp *.pkg.tar.* "$ROOT_DIR/" 2>/dev/null || true
+  cd "$PKG_DIR"
+  tar -c --zstd -f "$PKG_TAR" .PKGINFO .BUILDINFO usr
+  mv "$PKG_TAR" "$OLDPWD/"
 )
 
-rm -rf "$BUILD_TMP"
-echo "Done! Pacman package generated safely."
+rm -rf "$PKG_DIR"
+echo "Done! Generated $PKG_TAR"
+
 
