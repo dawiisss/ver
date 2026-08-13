@@ -1,0 +1,48 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build-release:
+    name: Build & Publish Release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-4-dev libadwaita-1-dev pkg-config
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build release binary
+        run: cargo build --release --verbose
+
+      - name: Package release artifact
+        run: |
+          mkdir -p staging
+          cp target/release/beautiful-goodall staging/ver
+          cp data/com.example.ver.desktop staging/
+          cp data/com.example.ver.png staging/
+          tar -czvf ver-linux-x86_64-${{ github.ref_name }}.tar.gz -C staging .
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ver-linux-x86_64-${{ github.ref_name }}.tar.gz
+          generate_release_notes: true
