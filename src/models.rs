@@ -182,8 +182,19 @@ pub struct AdvancedSettings {
     pub rdp_disable_wallpaper: bool,
     pub rdp_disable_themes: bool,
     pub rdp_disable_animations: bool,
+    #[serde(default = "default_true")]
+    pub rdp_glyph_cache: bool,
+    #[serde(default)]
+    pub rdp_microphone: bool,
+    #[serde(default)]
+    pub rdp_usb_redirect: bool,
+    #[serde(default = "default_true")]
+    pub rdp_smooth_fonts: bool,
+    #[serde(default = "default_true")]
+    pub rdp_desktop_composition: bool,
+    #[serde(default)]
+    pub rdp_hw_accel: bool,
 }
-
 fn default_true() -> bool { true }
 
 impl Default for AdvancedSettings {
@@ -215,6 +226,12 @@ impl Default for AdvancedSettings {
             rdp_disable_wallpaper: false,
             rdp_disable_themes: false,
             rdp_disable_animations: false,
+            rdp_glyph_cache: true,
+            rdp_microphone: false,
+            rdp_usb_redirect: false,
+            rdp_smooth_fonts: true,
+            rdp_desktop_composition: true,
+            rdp_hw_accel: false,
         }
     }
 }

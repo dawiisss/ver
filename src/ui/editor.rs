@@ -223,15 +223,55 @@ impl ConnectionEditor {
             .active(conn.advanced_settings.rdp_disable_animations)
             .build();
 
+        let switch_rdp_glyph_cache = adw::SwitchRow::builder()
+            .title("Glyph Caching")
+            .subtitle("Improves performance by caching font glyphs locally")
+            .active(conn.advanced_settings.rdp_glyph_cache)
+            .build();
+
+        let switch_rdp_microphone = adw::SwitchRow::builder()
+            .title("Microphone Redirection")
+            .subtitle("Forward local microphone to the remote host")
+            .active(conn.advanced_settings.rdp_microphone)
+            .build();
+
+        let switch_rdp_usb_redirect = adw::SwitchRow::builder()
+            .title("USB Redirection (Auto)")
+            .subtitle("Automatically redirect connected USB devices")
+            .active(conn.advanced_settings.rdp_usb_redirect)
+            .build();
+
+        let switch_rdp_smooth_fonts = adw::SwitchRow::builder()
+            .title("Smooth Fonts (ClearType)")
+            .active(conn.advanced_settings.rdp_smooth_fonts)
+            .build();
+
+        let switch_rdp_desktop_composition = adw::SwitchRow::builder()
+            .title("Desktop Composition (Aero)")
+            .active(conn.advanced_settings.rdp_desktop_composition)
+            .build();
+
+        let switch_rdp_hw_accel = adw::SwitchRow::builder()
+            .title("Hardware Graphics (GFX)")
+            .subtitle("Use hardware accelerated graphics pipeline if supported")
+            .active(conn.advanced_settings.rdp_hw_accel)
+            .build();
+
         group_rdp.add(&switch_rdp_fullscreen);
         group_rdp.add(&switch_rdp_multimon);
         group_rdp.add(&switch_rdp_audio);
+        group_rdp.add(&switch_rdp_microphone);
+        group_rdp.add(&switch_rdp_usb_redirect);
         group_rdp.add(&entry_rdp_domain);
         group_rdp.add(&entry_rdp_gateway);
         group_rdp.add(&entry_rdp_shared_folder);
         group_rdp.add(&combo_rdp_network);
         group_rdp.add(&switch_rdp_dynamic_res);
         group_rdp.add(&entry_rdp_custom_res);
+        group_rdp.add(&switch_rdp_glyph_cache);
+        group_rdp.add(&switch_rdp_smooth_fonts);
+        group_rdp.add(&switch_rdp_desktop_composition);
+        group_rdp.add(&switch_rdp_hw_accel);
         group_rdp.add(&switch_rdp_disable_wallpaper);
         group_rdp.add(&switch_rdp_disable_themes);
         group_rdp.add(&switch_rdp_disable_animations);
@@ -579,6 +619,12 @@ impl ConnectionEditor {
                     rdp_disable_wallpaper: switch_rdp_disable_wallpaper.is_active(),
                     rdp_disable_themes: switch_rdp_disable_themes.is_active(),
                     rdp_disable_animations: switch_rdp_disable_animations.is_active(),
+                    rdp_glyph_cache: switch_rdp_glyph_cache.is_active(),
+                    rdp_microphone: switch_rdp_microphone.is_active(),
+                    rdp_usb_redirect: switch_rdp_usb_redirect.is_active(),
+                    rdp_smooth_fonts: switch_rdp_smooth_fonts.is_active(),
+                    rdp_desktop_composition: switch_rdp_desktop_composition.is_active(),
+                    rdp_hw_accel: switch_rdp_hw_accel.is_active(),
                     vnc_viewonly: switch_vnc_viewonly.is_active(),
                     vnc_shared: switch_vnc_shared.is_active(),
                     clipboard_sharing: switch_clipboard.is_active(),

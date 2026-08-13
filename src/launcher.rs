@@ -138,6 +138,30 @@ pub fn build_rdp_args(conn: &Connection, password: Option<&str>) -> Vec<String> 
         args.push(format!("/size:{}", conn.advanced_settings.rdp_custom_resolution.trim()));
     }
 
+    if conn.advanced_settings.rdp_glyph_cache {
+        args.push("/cache:glyph:on".to_string());
+    }
+
+    if conn.advanced_settings.rdp_microphone {
+        args.push("/microphone".to_string());
+    }
+
+    if conn.advanced_settings.rdp_usb_redirect {
+        args.push("/usb:auto".to_string());
+    }
+
+    if conn.advanced_settings.rdp_smooth_fonts {
+        args.push("+fonts".to_string());
+    }
+
+    if conn.advanced_settings.rdp_desktop_composition {
+        args.push("+aero".to_string());
+    }
+
+    if conn.advanced_settings.rdp_hw_accel {
+        args.push("/gfx".to_string());
+    }
+
     match conn.advanced_settings.rdp_network_profile {
         RdpNetworkProfile::Auto => {} // Don't push any flag by default
         RdpNetworkProfile::Lan => args.push("/network:lan".to_string()),
