@@ -328,7 +328,7 @@ pub fn build_vnc_args(conn: &Connection) -> Vec<String> {
     }
 
     match conn.advanced_settings.vnc_color_level {
-        VncColorLevel::Full => args.push("-FullColor=1".to_string()),
+        VncColorLevel::Full => {} // AutoSelect is default. Passing -FullColor=1 disables AutoSelect.
         VncColorLevel::Medium => args.push("-LowColorLevel=2".to_string()),
         VncColorLevel::Low => args.push("-LowColorLevel=1".to_string()),
         VncColorLevel::VeryLow => args.push("-LowColorLevel=0".to_string()),
