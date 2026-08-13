@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=VER
+Comment=Very Easy Remote Connection Manager
+Exec=ver
+Icon=com.example.ver
+Terminal=false
+Type=Application
+Categories=Network;RemoteAccess;
+StartupNotify=true
