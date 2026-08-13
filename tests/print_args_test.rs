@@ -1,5 +1,5 @@
-use beautiful_goodall::models::{Connection, Protocol, VncColorLevel, VncEncodingOption};
 use beautiful_goodall::launcher::build_vnc_args;
+use beautiful_goodall::models::{Connection, Protocol, VncColorLevel, VncEncodingOption};
 
 #[test]
 fn test_print_args() {
@@ -16,4 +16,3 @@ fn test_print_args() {
     assert!(args.contains(&"-PreferredEncoding=Tight".to_string()));
     assert!(args.contains(&"192.168.1.100:5900".to_string()));
 }
-

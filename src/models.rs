@@ -195,7 +195,9 @@ pub struct AdvancedSettings {
     #[serde(default)]
     pub rdp_hw_accel: bool,
 }
-fn default_true() -> bool { true }
+fn default_true() -> bool {
+    true
+}
 
 impl Default for AdvancedSettings {
     fn default() -> Self {
@@ -328,7 +330,11 @@ impl Connection {
     pub fn sanitize(&mut self) -> bool {
         let mut modified = false;
 
-        if self.id.trim().is_empty() || self.id.contains('/') || self.id.contains('\\') || self.id.contains("..") {
+        if self.id.trim().is_empty()
+            || self.id.contains('/')
+            || self.id.contains('\\')
+            || self.id.contains("..")
+        {
             self.id = Uuid::new_v4().to_string();
             modified = true;
         }
@@ -365,7 +371,10 @@ impl Connection {
         if clean.len() == 12 {
             Ok(Some(clean.to_uppercase()))
         } else {
-            Err(format!("Invalid MAC address format: '{}'", self.mac_address))
+            Err(format!(
+                "Invalid MAC address format: '{}'",
+                self.mac_address
+            ))
         }
     }
 }
@@ -420,7 +429,8 @@ mod tests {
     #[test]
     fn test_deserialize_empty_json_object() {
         let json_data = "{}";
-        let conn: Connection = serde_json::from_str(json_data).expect("Should deserialize empty JSON object into defaults");
+        let conn: Connection = serde_json::from_str(json_data)
+            .expect("Should deserialize empty JSON object into defaults");
         assert!(!conn.id.is_empty());
         assert_eq!(conn.name, "New Connection");
         assert_eq!(conn.protocol, Protocol::Rdp);
@@ -436,7 +446,8 @@ mod tests {
             "protocol": "vnc",
             "host": "10.0.0.50"
         }"#;
-        let conn: Connection = serde_json::from_str(json_data).expect("Should deserialize partial JSON");
+        let conn: Connection =
+            serde_json::from_str(json_data).expect("Should deserialize partial JSON");
         assert_eq!(conn.id, "11111111-2222-3333-4444-555555555555");
         assert_eq!(conn.name, "Production Server");
         assert_eq!(conn.protocol, Protocol::Vnc);
@@ -453,7 +464,8 @@ mod tests {
             "unknown_legacy_field_1": 12345,
             "deprecated_flag": true
         }"#;
-        let conn: Connection = serde_json::from_str(json_data).expect("Should ignore unknown JSON fields cleanly");
+        let conn: Connection =
+            serde_json::from_str(json_data).expect("Should ignore unknown JSON fields cleanly");
         assert_eq!(conn.id, "11111111-2222-3333-4444-555555555555");
         assert_eq!(conn.name, "Legacy Conn");
     }
@@ -475,10 +487,22 @@ mod tests {
 
     #[test]
     fn test_vnc_color_level_enum_serde_representations() {
-        assert_eq!(serde_json::to_string(&VncColorLevel::Full).unwrap(), r#""Full Color (Default)""#);
-        assert_eq!(serde_json::to_string(&VncColorLevel::Medium).unwrap(), r#""Medium""#);
-        assert_eq!(serde_json::to_string(&VncColorLevel::Low).unwrap(), r#""Low""#);
-        assert_eq!(serde_json::to_string(&VncColorLevel::VeryLow).unwrap(), r#""Very Low""#);
+        assert_eq!(
+            serde_json::to_string(&VncColorLevel::Full).unwrap(),
+            r#""Full Color (Default)""#
+        );
+        assert_eq!(
+            serde_json::to_string(&VncColorLevel::Medium).unwrap(),
+            r#""Medium""#
+        );
+        assert_eq!(
+            serde_json::to_string(&VncColorLevel::Low).unwrap(),
+            r#""Low""#
+        );
+        assert_eq!(
+            serde_json::to_string(&VncColorLevel::VeryLow).unwrap(),
+            r#""Very Low""#
+        );
 
         let c_full: VncColorLevel = serde_json::from_str(r#""Full Color (Default)""#).unwrap();
         let c_med: VncColorLevel = serde_json::from_str(r#""Medium""#).unwrap();

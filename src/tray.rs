@@ -1,4 +1,4 @@
-use ksni::{Tray, MenuItem, menu::StandardItem};
+use ksni::{menu::StandardItem, MenuItem, Tray};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TrayMessage {
@@ -35,15 +35,16 @@ impl Tray for VerTray {
                     let _ = this.tx.try_send(TrayMessage::Show);
                 }),
                 ..Default::default()
-            }.into(),
+            }
+            .into(),
             StandardItem {
                 label: "Quit".into(),
                 activate: Box::new(|this: &mut Self| {
                     let _ = this.tx.try_send(TrayMessage::Quit);
                 }),
                 ..Default::default()
-            }.into(),
+            }
+            .into(),
         ]
     }
 }
-

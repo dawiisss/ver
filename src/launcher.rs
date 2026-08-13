@@ -1,7 +1,7 @@
+use crate::models::{Connection, RdpColorDepth, RdpNetworkProfile};
 use std::env;
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
-use crate::models::{Connection, RdpColorDepth, RdpNetworkProfile};
 
 /// Linux terminal emulator search order for interactive SSH sessions.
 pub const TERMINAL_CANDIDATES: &[&'static str] = &[
@@ -131,11 +131,23 @@ pub fn build_rdp_args(conn: &Connection, password: Option<&str>) -> Vec<String> 
     }
 
     if !conn.advanced_settings.rdp_shared_folder.trim().is_empty() {
-        args.push(format!("/drive:shared,{}", conn.advanced_settings.rdp_shared_folder.trim()));
+        args.push(format!(
+            "/drive:shared,{}",
+            conn.advanced_settings.rdp_shared_folder.trim()
+        ));
     }
 
-    if !conn.advanced_settings.rdp_custom_resolution.trim().is_empty() && !conn.advanced_settings.rdp_fullscreen {
-        args.push(format!("/size:{}", conn.advanced_settings.rdp_custom_resolution.trim()));
+    if !conn
+        .advanced_settings
+        .rdp_custom_resolution
+        .trim()
+        .is_empty()
+        && !conn.advanced_settings.rdp_fullscreen
+    {
+        args.push(format!(
+            "/size:{}",
+            conn.advanced_settings.rdp_custom_resolution.trim()
+        ));
     }
 
     if conn.advanced_settings.rdp_glyph_cache {
@@ -242,8 +254,8 @@ pub fn build_terminal_command(
     }
 
     cmd.stdin(Stdio::null())
-       .stdout(Stdio::piped())
-       .stderr(Stdio::piped());
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
 
     #[cfg(unix)]
     {
@@ -264,9 +276,9 @@ pub fn launch_rdp(conn: &Connection, password: Option<&str>) -> Result<Child, St
     let mut cmd = Command::new("xfreerdp3");
 
     cmd.args(&args)
-       .stdin(Stdio::null())
-       .stdout(Stdio::piped())
-       .stderr(Stdio::piped());
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
 
     #[cfg(unix)]
     {
@@ -275,7 +287,7 @@ pub fn launch_rdp(conn: &Connection, password: Option<&str>) -> Result<Child, St
     }
 
     cmd.spawn()
-       .map_err(|e| format!("Failed to spawn xfreerdp3 process: {}", e))
+        .map_err(|e| format!("Failed to spawn xfreerdp3 process: {}", e))
 }
 
 /// Launches an SSH session in an available terminal emulator with an optional SSH identity key file.
@@ -296,7 +308,7 @@ pub fn launch_ssh_with_identity(
 
     let mut cmd = build_terminal_command(term_name, conn, identity_file);
     cmd.spawn()
-       .map_err(|e| format!("Failed to spawn terminal emulator '{}': {}", term_name, e))
+        .map_err(|e| format!("Failed to spawn terminal emulator '{}': {}", term_name, e))
 }
 
 /// Launches an SSH session in an available terminal emulator.
@@ -329,16 +341,16 @@ pub fn build_spice_args(conn: &Connection) -> Vec<String> {
 
 pub fn build_vnc_args(conn: &Connection) -> Vec<String> {
     let mut args = vec![];
-    
+
     if conn.advanced_settings.vnc_viewonly {
         args.push("-ViewOnly".to_string());
     }
-    
+
     if conn.advanced_settings.vnc_shared {
         args.push("-Shared".to_string());
     }
 
-    use crate::models::{VncEncodingOption, VncColorLevel};
+    use crate::models::{VncColorLevel, VncEncodingOption};
     match conn.advanced_settings.vnc_encoding {
         VncEncodingOption::Tight => args.push("-PreferredEncoding=Tight".to_string()),
         VncEncodingOption::Zrle => args.push("-PreferredEncoding=ZRLE".to_string()),
@@ -363,17 +375,27 @@ pub fn build_vnc_args(conn: &Connection) -> Vec<String> {
     }
 
     if conn.advanced_settings.vnc_compress_level > 0 {
-        args.push(format!("-CompressLevel={}", conn.advanced_settings.vnc_compress_level));
+        args.push(format!(
+            "-CompressLevel={}",
+            conn.advanced_settings.vnc_compress_level
+        ));
     }
 
     if conn.advanced_settings.vnc_quality_level > 0 {
-        args.push(format!("-QualityLevel={}", conn.advanced_settings.vnc_quality_level));
+        args.push(format!(
+            "-QualityLevel={}",
+            conn.advanced_settings.vnc_quality_level
+        ));
     }
 
     let resolved_port = conn.resolve_port();
-    let port_to_use = if resolved_port == 0 { 5900 } else { resolved_port };
+    let port_to_use = if resolved_port == 0 {
+        5900
+    } else {
+        resolved_port
+    };
     args.push(format!("{}:{}", conn.host.trim(), port_to_use));
-    
+
     args
 }
 
@@ -383,10 +405,10 @@ pub fn launch_vnc(conn: &Connection, password: Option<&str>) -> Result<Child, St
     }
 
     let mut args = build_vnc_args(conn);
-    
+
     // Check if we have a password
     let mut temp_file_path = None;
-    
+
     if let Some(pass) = password.filter(|p| !p.is_empty()) {
         // Use vncpasswd -f to encrypt the password
         let mut vncpasswd = Command::new("vncpasswd")
@@ -396,7 +418,7 @@ pub fn launch_vnc(conn: &Connection, password: Option<&str>) -> Result<Child, St
             .stderr(Stdio::null())
             .spawn()
             .map_err(|e| format!("Failed to run vncpasswd: {}", e))?;
-            
+
         {
             use std::io::Write;
             if let Some(mut stdin) = vncpasswd.stdin.take() {
@@ -406,8 +428,10 @@ pub fn launch_vnc(conn: &Connection, password: Option<&str>) -> Result<Child, St
                 let _ = stdin.write_all(b"\n");
             }
         }
-        
-        let output = vncpasswd.wait_with_output().map_err(|e| format!("vncpasswd failed: {}", e))?;
+
+        let output = vncpasswd
+            .wait_with_output()
+            .map_err(|e| format!("vncpasswd failed: {}", e))?;
         if output.status.success() {
             use std::io::Write;
             let mut builder = tempfile::Builder::new();
@@ -433,19 +457,20 @@ pub fn launch_vnc(conn: &Connection, password: Option<&str>) -> Result<Child, St
     let mut cmd = Command::new("vncviewer");
 
     cmd.args(&args)
-       .stdin(Stdio::null())
-       .stdout(Stdio::piped())
-       .stderr(Stdio::piped());
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
 
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt;
         cmd.process_group(0);
     }
-    
-    let child = cmd.spawn()
-       .map_err(|e| format!("Failed to spawn vncviewer process: {}", e))?;
-       
+
+    let child = cmd
+        .spawn()
+        .map_err(|e| format!("Failed to spawn vncviewer process: {}", e))?;
+
     // Clean up password file after viewer has had time to read it
     if let Some(path) = temp_file_path {
         std::thread::spawn(move || {
@@ -453,7 +478,7 @@ pub fn launch_vnc(conn: &Connection, password: Option<&str>) -> Result<Child, St
             let _ = std::fs::remove_file(path);
         });
     }
-    
+
     Ok(child)
 }
 
@@ -473,9 +498,9 @@ pub fn launch_spice(conn: &Connection, password: Option<&str>) -> Result<Child, 
     }
 
     cmd.args(&args)
-       .stdin(Stdio::null())
-       .stdout(Stdio::piped())
-       .stderr(Stdio::piped());
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
 
     #[cfg(unix)]
     {
@@ -484,7 +509,7 @@ pub fn launch_spice(conn: &Connection, password: Option<&str>) -> Result<Child, 
     }
 
     cmd.spawn()
-       .map_err(|e| format!("Failed to spawn remote-viewer process: {}", e))
+        .map_err(|e| format!("Failed to spawn remote-viewer process: {}", e))
 }
 
 #[cfg(test)]
@@ -585,7 +610,14 @@ mod tests {
     fn test_detect_terminal_emulator_candidates_list() {
         assert_eq!(
             TERMINAL_CANDIDATES,
-            &["ptyxis", "kgx", "gnome-terminal", "konsole", "alacritty", "xterm"]
+            &[
+                "ptyxis",
+                "kgx",
+                "gnome-terminal",
+                "konsole",
+                "alacritty",
+                "xterm"
+            ]
         );
     }
 

@@ -29,7 +29,10 @@ pub fn parse_mac_address(mac_address: &str) -> Result<[u8; 6], String> {
     for i in 0..6 {
         let hex_slice = &clean[i * 2..i * 2 + 2];
         mac_bytes[i] = u8::from_str_radix(hex_slice, 16).map_err(|_| {
-            format!("Invalid hex byte '{}' in MAC address: '{}'", hex_slice, mac_address)
+            format!(
+                "Invalid hex byte '{}' in MAC address: '{}'",
+                hex_slice, mac_address
+            )
         })?;
     }
 
@@ -97,8 +100,8 @@ pub fn build_wol_packet_bytes(mac: &[u8; 6]) -> [u8; 102] {
 /// Send a Wake-on-LAN magic packet to specified broadcast address (host or host:port).
 pub fn send_wol_to(mac_address: &str, target_addr: &str) -> Result<(), String> {
     let packet = build_wol_packet(mac_address)?;
-    let socket = UdpSocket::bind("0.0.0.0:0")
-        .map_err(|e| format!("Failed to bind UDP socket: {}", e))?;
+    let socket =
+        UdpSocket::bind("0.0.0.0:0").map_err(|e| format!("Failed to bind UDP socket: {}", e))?;
 
     socket
         .set_broadcast(true)
@@ -210,7 +213,9 @@ mod tests {
         assert!(result.is_ok(), "Sending WoL to loopback should succeed");
 
         let mut buf = [0u8; 200];
-        let (amt, _src) = rx_socket.recv_from(&mut buf).expect("Must receive UDP packet");
+        let (amt, _src) = rx_socket
+            .recv_from(&mut buf)
+            .expect("Must receive UDP packet");
         assert_eq!(amt, 102);
         assert_eq!(&buf[0..6], &[0xFF; 6]);
         assert_eq!(&buf[6..12], &[0x00, 0x11, 0x22, 0x33, 0x44, 0x55]);

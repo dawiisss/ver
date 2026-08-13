@@ -1,5 +1,7 @@
 use beautiful_goodall::models::{AppConfig, Connection};
-use beautiful_goodall::ui::{ConnectionEditor, DiscoveryDialog, DiscoveredService, MainWindow, PreferencesWindow};
+use beautiful_goodall::ui::{
+    ConnectionEditor, DiscoveredService, DiscoveryDialog, MainWindow, PreferencesWindow,
+};
 
 #[test]
 fn test_main_window_initialization_and_filtering() {
@@ -16,10 +18,7 @@ fn test_main_window_initialization_and_filtering() {
     let window = MainWindow::new(vec![conn1, conn2], AppConfig::default());
     assert_eq!(window.filtered_connections().len(), 2);
 
-    let mut window_filtered = MainWindow::new(
-        window.connections.clone(),
-        AppConfig::default(),
-    );
+    let mut window_filtered = MainWindow::new(window.connections.clone(), AppConfig::default());
     window_filtered.set_search_filter("Web");
     let filtered = window_filtered.filtered_connections();
     assert_eq!(filtered.len(), 1);

@@ -1,9 +1,9 @@
-use std::cell::RefCell;
-use std::rc::Rc;
 use gtk::glib;
 use gtk::prelude::*;
-use libadwaita::prelude::*;
 use libadwaita as adw;
+use libadwaita::prelude::*;
+use std::cell::RefCell;
+use std::rc::Rc;
 
 use crate::models::{AppConfig, Protocol, VncColorLevel};
 use crate::storage::save_config;
@@ -57,9 +57,7 @@ impl PreferencesWindow {
             .build();
 
         // 1. Appearance Group
-        let group_appearance = adw::PreferencesGroup::builder()
-            .title("Appearance")
-            .build();
+        let group_appearance = adw::PreferencesGroup::builder().title("Appearance").build();
 
         let theme_model = gtk::StringList::new(&["System Default", "Dark Mode", "Light Mode"]);
         let current_theme = config.borrow().theme.clone();
@@ -142,7 +140,8 @@ impl PreferencesWindow {
         group_defaults.add(&switch_autoconnect);
 
         // Default VNC Color Level
-        let color_model = gtk::StringList::new(&["Full Color (Default)", "Medium", "Low", "Very Low"]);
+        let color_model =
+            gtk::StringList::new(&["Full Color (Default)", "Medium", "Low", "Very Low"]);
         let default_color_idx = match config.borrow().default_vnc_color_level {
             VncColorLevel::Full => 0,
             VncColorLevel::Medium => 1,

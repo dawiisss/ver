@@ -1,6 +1,6 @@
 use gtk::prelude::*;
-use libadwaita::prelude::*;
 use libadwaita as adw;
+use libadwaita::prelude::*;
 
 use crate::models::{AdvancedSettings, Connection, Protocol, RdpColorDepth, RdpNetworkProfile};
 
@@ -292,7 +292,8 @@ impl ConnectionEditor {
             .active(conn.advanced_settings.vnc_clipboard)
             .build();
 
-        let color_model = gtk::StringList::new(&["Full Color (Default)", "Medium", "Low", "Very Low"]);
+        let color_model =
+            gtk::StringList::new(&["Full Color (Default)", "Medium", "Low", "Very Low"]);
         let vnc_color_idx = match conn.advanced_settings.vnc_color_level {
             crate::models::VncColorLevel::Full => 0,
             crate::models::VncColorLevel::Medium => 1,
@@ -304,15 +305,37 @@ impl ConnectionEditor {
             .model(&color_model)
             .selected(vnc_color_idx)
             .build();
-            
-        let compress_model = gtk::StringList::new(&["Auto (Default)", "1 (Fast)", "2", "3", "4", "5", "6", "7", "8", "9 (Best)"]);
+
+        let compress_model = gtk::StringList::new(&[
+            "Auto (Default)",
+            "1 (Fast)",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9 (Best)",
+        ]);
         let combo_vnc_compress = adw::ComboRow::builder()
             .title("Compression Level")
             .model(&compress_model)
             .selected(conn.advanced_settings.vnc_compress_level as u32)
             .build();
 
-        let quality_model = gtk::StringList::new(&["Auto (Default)", "1 (Low)", "2", "3", "4", "5", "6", "7", "8", "9 (High)"]);
+        let quality_model = gtk::StringList::new(&[
+            "Auto (Default)",
+            "1 (Low)",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9 (High)",
+        ]);
         let combo_vnc_quality = adw::ComboRow::builder()
             .title("JPEG Quality Level")
             .model(&quality_model)
@@ -386,7 +409,8 @@ impl ConnectionEditor {
             let entry_port = entry_port.clone();
             move |idx: u32, set_default_port: bool| {
                 match idx {
-                    0 | 4 => { // RDP / XRDP
+                    0 | 4 => {
+                        // RDP / XRDP
                         group_rdp.set_visible(true);
                         group_vnc.set_visible(false);
                         group_spice.set_visible(false);
@@ -394,7 +418,8 @@ impl ConnectionEditor {
                             entry_port.set_text("3389");
                         }
                     }
-                    1 => { // VNC
+                    1 => {
+                        // VNC
                         group_rdp.set_visible(false);
                         group_vnc.set_visible(true);
                         group_spice.set_visible(false);
@@ -402,7 +427,8 @@ impl ConnectionEditor {
                             entry_port.set_text("5900");
                         }
                     }
-                    3 => { // SPICE
+                    3 => {
+                        // SPICE
                         group_rdp.set_visible(false);
                         group_vnc.set_visible(false);
                         group_spice.set_visible(true);
@@ -410,7 +436,8 @@ impl ConnectionEditor {
                             entry_port.set_text("5900");
                         }
                     }
-                    _ => { // SSH
+                    _ => {
+                        // SSH
                         group_rdp.set_visible(false);
                         group_vnc.set_visible(false);
                         group_spice.set_visible(false);
@@ -489,13 +516,9 @@ impl ConnectionEditor {
             .css_classes(vec!["destructive-action"])
             .build();
 
-        let btn_duplicate = gtk::Button::builder()
-            .label("Duplicate")
-            .build();
+        let btn_duplicate = gtk::Button::builder().label("Duplicate").build();
 
-        let btn_wake = gtk::Button::builder()
-            .label("Wake")
-            .build();
+        let btn_wake = gtk::Button::builder().label("Wake").build();
 
         let btn_save = gtk::Button::builder()
             .label("Save")
@@ -653,44 +676,38 @@ impl ConnectionEditor {
         // Wire Action Handlers
         let extract_for_save = extract_form.clone();
         let toast_overlay_save = toast_overlay.clone();
-        btn_save.connect_clicked(move |_| {
-            match extract_for_save() {
-                Ok((c, p)) => {
-                    on_save(c, p);
-                    toast_overlay_save.add_toast(adw::Toast::new("Connection saved successfully"));
-                }
-                Err(err) => {
-                    toast_overlay_save.add_toast(adw::Toast::new(&err));
-                }
+        btn_save.connect_clicked(move |_| match extract_for_save() {
+            Ok((c, p)) => {
+                on_save(c, p);
+                toast_overlay_save.add_toast(adw::Toast::new("Connection saved successfully"));
+            }
+            Err(err) => {
+                toast_overlay_save.add_toast(adw::Toast::new(&err));
             }
         });
 
         let extract_for_connect = extract_form.clone();
         let toast_overlay_conn = toast_overlay.clone();
-        btn_connect.connect_clicked(move |_| {
-            match extract_for_connect() {
-                Ok((c, p)) => {
-                    on_connect(c, p);
-                }
-                Err(err) => {
-                    toast_overlay_conn.add_toast(adw::Toast::new(&err));
-                }
+        btn_connect.connect_clicked(move |_| match extract_for_connect() {
+            Ok((c, p)) => {
+                on_connect(c, p);
+            }
+            Err(err) => {
+                toast_overlay_conn.add_toast(adw::Toast::new(&err));
             }
         });
 
         let extract_for_dup = extract_form.clone();
         let toast_overlay_dup = toast_overlay.clone();
-        btn_duplicate.connect_clicked(move |_| {
-            match extract_for_dup() {
-                Ok((mut c, p)) => {
-                    c.id = uuid::Uuid::new_v4().to_string();
-                    c.name = format!("{} (Copy)", c.name);
-                    on_duplicate(c, p);
-                    toast_overlay_dup.add_toast(adw::Toast::new("Connection duplicated"));
-                }
-                Err(err) => {
-                    toast_overlay_dup.add_toast(adw::Toast::new(&err));
-                }
+        btn_duplicate.connect_clicked(move |_| match extract_for_dup() {
+            Ok((mut c, p)) => {
+                c.id = uuid::Uuid::new_v4().to_string();
+                c.name = format!("{} (Copy)", c.name);
+                on_duplicate(c, p);
+                toast_overlay_dup.add_toast(adw::Toast::new("Connection duplicated"));
+            }
+            Err(err) => {
+                toast_overlay_dup.add_toast(adw::Toast::new(&err));
             }
         });
 
@@ -713,7 +730,8 @@ impl ConnectionEditor {
                     toast_overlay_wake.add_toast(adw::Toast::new("Wake-on-LAN packet sent"));
                 }
                 Ok(None) => {
-                    toast_overlay_wake.add_toast(adw::Toast::new("Please specify a valid MAC address"));
+                    toast_overlay_wake
+                        .add_toast(adw::Toast::new("Please specify a valid MAC address"));
                 }
                 Err(err) => {
                     toast_overlay_wake.add_toast(adw::Toast::new(&err));

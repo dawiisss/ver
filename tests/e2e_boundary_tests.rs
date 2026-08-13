@@ -15,7 +15,8 @@ fn test_t2_boundary_empty_json_file() {
     let empty_file = dir.path().join("empty.json");
     fs::write(&empty_file, "").unwrap();
 
-    let loaded = load_connections_from_path(&empty_file).expect("Loading empty file must return empty vec");
+    let loaded =
+        load_connections_from_path(&empty_file).expect("Loading empty file must return empty vec");
     assert!(loaded.is_empty());
 }
 
@@ -25,12 +26,15 @@ fn test_t2_boundary_corrupt_json_syntax() {
     let corrupt_file = dir.path().join("corrupt.json");
     fs::write(&corrupt_file, "{ invalid json syntax: [ ...").unwrap();
 
-    let loaded = load_connections_from_path(&corrupt_file).expect("Loading corrupt file must handle error gracefully");
+    let loaded = load_connections_from_path(&corrupt_file)
+        .expect("Loading corrupt file must handle error gracefully");
     assert!(loaded.is_empty());
 
     let entries = fs::read_dir(dir.path()).unwrap();
     let backup_found = entries.filter_map(|e| e.ok()).any(|e| {
-        e.file_name().to_string_lossy().contains("corrupt.json.corrupt.")
+        e.file_name()
+            .to_string_lossy()
+            .contains("corrupt.json.corrupt.")
     });
     assert!(backup_found, "Corrupt backup file should be created");
 }
@@ -91,7 +95,10 @@ fn test_t2_boundary_unknown_protocol_strings_rejection() {
     }"#;
 
     let res: Result<Connection, _> = serde_json::from_str(json);
-    assert!(res.is_err(), "Unknown protocol string 'http' must fail deserialization");
+    assert!(
+        res.is_err(),
+        "Unknown protocol string 'http' must fail deserialization"
+    );
 }
 
 #[test]

@@ -1,11 +1,11 @@
-use std::cell::RefCell;
-use std::collections::BTreeMap;
-use std::rc::Rc;
 use gtk::gio;
 use gtk::glib;
 use gtk::prelude::*;
-use libadwaita::prelude::*;
 use libadwaita as adw;
+use libadwaita::prelude::*;
+use std::cell::RefCell;
+use std::collections::BTreeMap;
+use std::rc::Rc;
 
 use crate::launcher;
 use crate::models::{AppConfig, Connection, Protocol};
@@ -15,9 +15,6 @@ use crate::storage;
 use crate::ui::discovery::DiscoveryDialog;
 use crate::ui::editor::ConnectionEditor;
 use crate::ui::preferences::{apply_theme, PreferencesWindow};
-
-
-
 
 pub struct AppWindowState {
     pub connections: Vec<Connection>,
@@ -84,7 +81,11 @@ impl MainWindow {
     }
 
     /// Build and present GTK4 / Libadwaita ApplicationWindow interface.
-    pub fn build_ui(app: &adw::Application, connections: Vec<Connection>, config: AppConfig) -> adw::ApplicationWindow {
+    pub fn build_ui(
+        app: &adw::Application,
+        connections: Vec<Connection>,
+        config: AppConfig,
+    ) -> adw::ApplicationWindow {
         let state = Rc::new(RefCell::new(AppWindowState {
             connections,
             selected_id: None,
@@ -158,7 +159,8 @@ impl MainWindow {
             .build();
 
         search_bar.connect_entry(&search_entry);
-        search_toggle.bind_property("active", &search_bar, "search-mode-enabled")
+        search_toggle
+            .bind_property("active", &search_bar, "search-mode-enabled")
             .bidirectional()
             .build();
 
@@ -201,15 +203,14 @@ impl MainWindow {
 
         content_stack.add_named(&status_page, Some("welcome"));
         content_stack.add_named(&editor_container, Some("editor"));
-        
+
         // External Session Tracker Container
         let external_session_container = gtk::Box::new(gtk::Orientation::Vertical, 0);
         external_session_container.set_vexpand(true);
         external_session_container.set_hexpand(true);
         content_stack.add_named(&external_session_container, Some("external_session"));
-        
-        content_stack.set_visible_child_name("welcome");
 
+        content_stack.set_visible_child_name("welcome");
 
         let paned = gtk::Paned::builder()
             .orientation(gtk::Orientation::Horizontal)
@@ -264,7 +265,8 @@ impl MainWindow {
         let prefs_action = gio::SimpleAction::new("preferences", None);
         prefs_action.connect_activate(move |_, _| {
             let config_rc = Rc::new(RefCell::new(state_for_menu_prefs.borrow().config.clone()));
-            let prefs_dialog = PreferencesWindow::build_window(Some(&window_for_menu_prefs), config_rc.clone());
+            let prefs_dialog =
+                PreferencesWindow::build_window(Some(&window_for_menu_prefs), config_rc.clone());
             let state_for_close = state_for_menu_prefs.clone();
             prefs_dialog.connect_close_request(move |_| {
                 state_for_close.borrow_mut().config = config_rc.borrow().clone();
@@ -347,7 +349,8 @@ impl MainWindow {
                 list_box.invalidate_headers();
 
                 list_box.select_row(Some(&row));
-                window_title.set_subtitle(&format!("{} connections", state.borrow().connections.len()));
+                window_title
+                    .set_subtitle(&format!("{} connections", state.borrow().connections.len()));
             }
         };
 
@@ -362,8 +365,9 @@ impl MainWindow {
         let state_for_prefs = state.clone();
         prefs_btn.connect_clicked(move |_| {
             let config_rc = Rc::new(RefCell::new(state_for_prefs.borrow().config.clone()));
-            let prefs_dialog = PreferencesWindow::build_window(Some(&window_for_prefs), config_rc.clone());
-            
+            let prefs_dialog =
+                PreferencesWindow::build_window(Some(&window_for_prefs), config_rc.clone());
+
             // Sync updated config back to window state on close
             let state_for_close = state_for_prefs.clone();
             prefs_dialog.connect_close_request(move |_| {
@@ -397,7 +401,10 @@ impl MainWindow {
                     list_box_inner.invalidate_headers();
 
                     list_box_inner.select_row(Some(&row));
-                    window_title_inner.set_subtitle(&format!("{} connections", state_inner.borrow().connections.len()));
+                    window_title_inner.set_subtitle(&format!(
+                        "{} connections",
+                        state_inner.borrow().connections.len()
+                    ));
                 },
             );
             disc_window.present();
@@ -412,125 +419,126 @@ impl MainWindow {
         let external_session_container_clone = external_session_container.clone();
         let content_stack_clone = content_stack.clone();
 
-        let track_external_session = Rc::new(move |mut child: std::process::Child, name: String| {
-            let container = external_session_container_clone.clone();
-            let stack = content_stack_clone.clone();
-            
-            while let Some(c) = container.first_child() {
-                container.remove(&c);
-            }
+        let track_external_session =
+            Rc::new(move |mut child: std::process::Child, name: String| {
+                let container = external_session_container_clone.clone();
+                let stack = content_stack_clone.clone();
 
-            let title = gtk::Label::builder()
-                .label(format!("External Session Active: {}", name))
-                .css_classes(vec!["title-2"])
-                .margin_top(48)
-                .margin_bottom(12)
-                .build();
+                while let Some(c) = container.first_child() {
+                    container.remove(&c);
+                }
 
-            let btn_disconnect = gtk::Button::builder()
-                .label("Disconnect")
-                .css_classes(vec!["destructive-action", "pill"])
-                .halign(gtk::Align::Center)
-                .margin_bottom(24)
-                .build();
+                let title = gtk::Label::builder()
+                    .label(format!("External Session Active: {}", name))
+                    .css_classes(vec!["title-2"])
+                    .margin_top(48)
+                    .margin_bottom(12)
+                    .build();
 
-            let log_view = gtk::TextView::builder()
-                .editable(false)
-                .cursor_visible(false)
-                .monospace(true)
-                .css_classes(vec!["card", "view"])
-                .left_margin(12)
-                .right_margin(12)
-                .top_margin(12)
-                .bottom_margin(12)
-                .wrap_mode(gtk::WrapMode::WordChar)
-                .build();
-            
-            let scroll = gtk::ScrolledWindow::builder()
-                .child(&log_view)
-                .vexpand(true)
-                .hexpand(true)
-                .min_content_height(300)
-                .margin_start(24)
-                .margin_end(24)
-                .margin_bottom(24)
-                .build();
+                let btn_disconnect = gtk::Button::builder()
+                    .label("Disconnect")
+                    .css_classes(vec!["destructive-action", "pill"])
+                    .halign(gtk::Align::Center)
+                    .margin_bottom(24)
+                    .build();
 
-            let (tx, rx) = async_channel::unbounded::<ExternalSessionEvent>();
+                let log_view = gtk::TextView::builder()
+                    .editable(false)
+                    .cursor_visible(false)
+                    .monospace(true)
+                    .css_classes(vec!["card", "view"])
+                    .left_margin(12)
+                    .right_margin(12)
+                    .top_margin(12)
+                    .bottom_margin(12)
+                    .wrap_mode(gtk::WrapMode::WordChar)
+                    .build();
 
-            let stdout_pipe = child.stdout.take();
-            let stderr_pipe = child.stderr.take();
+                let scroll = gtk::ScrolledWindow::builder()
+                    .child(&log_view)
+                    .vexpand(true)
+                    .hexpand(true)
+                    .min_content_height(300)
+                    .margin_start(24)
+                    .margin_end(24)
+                    .margin_bottom(24)
+                    .build();
 
-            let tx_out = tx.clone();
-            if let Some(stdout) = stdout_pipe {
-                std::thread::spawn(move || {
-                    use std::io::{BufRead, BufReader};
-                    let reader = BufReader::new(stdout);
-                    for line in reader.lines() {
-                        if let Ok(l) = line {
-                            let _ = tx_out.send_blocking(ExternalSessionEvent::Log(l));
-                        }
-                    }
-                });
-            }
+                let (tx, rx) = async_channel::unbounded::<ExternalSessionEvent>();
 
-            let tx_err = tx.clone();
-            if let Some(stderr) = stderr_pipe {
-                std::thread::spawn(move || {
-                    use std::io::{BufRead, BufReader};
-                    let reader = BufReader::new(stderr);
-                    for line in reader.lines() {
-                        if let Ok(l) = line {
-                            let _ = tx_err.send_blocking(ExternalSessionEvent::Log(l));
-                        }
-                    }
-                });
-            }
+                let stdout_pipe = child.stdout.take();
+                let stderr_pipe = child.stderr.take();
 
-            let child_arc = std::sync::Arc::new(std::sync::Mutex::new(Some(child)));
-            let child_arc_for_btn = child_arc.clone();
-            let stack_for_btn = stack.clone();
-            
-            btn_disconnect.connect_clicked(move |_| {
-                let mut opt = child_arc_for_btn.lock().unwrap();
-                if let Some(mut c) = opt.take() {
+                let tx_out = tx.clone();
+                if let Some(stdout) = stdout_pipe {
                     std::thread::spawn(move || {
-                        #[cfg(unix)]
-                        {
-                            let pid = c.id();
-                            unsafe {
-                                libc::kill(pid as i32, libc::SIGTERM);
+                        use std::io::{BufRead, BufReader};
+                        let reader = BufReader::new(stdout);
+                        for line in reader.lines() {
+                            if let Ok(l) = line {
+                                let _ = tx_out.send_blocking(ExternalSessionEvent::Log(l));
                             }
-                        }
-                        
-                        let mut exited = false;
-                        for _ in 0..20 { // wait up to 2 seconds
-                            if let Ok(Some(_)) = c.try_wait() {
-                                exited = true;
-                                break;
-                            }
-                            std::thread::sleep(std::time::Duration::from_millis(100));
-                        }
-                        
-                        if !exited {
-                            let _ = c.kill();
-                            let _ = c.wait();
                         }
                     });
                 }
-                stack_for_btn.set_visible_child_name("editor");
-            });
 
-            container.append(&title);
-            container.append(&btn_disconnect);
-            container.append(&scroll);
-            stack.set_visible_child_name("external_session");
+                let tx_err = tx.clone();
+                if let Some(stderr) = stderr_pipe {
+                    std::thread::spawn(move || {
+                        use std::io::{BufRead, BufReader};
+                        let reader = BufReader::new(stderr);
+                        for line in reader.lines() {
+                            if let Ok(l) = line {
+                                let _ = tx_err.send_blocking(ExternalSessionEvent::Log(l));
+                            }
+                        }
+                    });
+                }
 
-            let child_arc_for_thread = child_arc.clone();
-            let tx_exit = tx.clone();
-            
-            std::thread::spawn(move || {
-                loop {
+                let child_arc = std::sync::Arc::new(std::sync::Mutex::new(Some(child)));
+                let child_arc_for_btn = child_arc.clone();
+                let stack_for_btn = stack.clone();
+
+                btn_disconnect.connect_clicked(move |_| {
+                    let mut opt = child_arc_for_btn.lock().unwrap();
+                    if let Some(mut c) = opt.take() {
+                        std::thread::spawn(move || {
+                            #[cfg(unix)]
+                            {
+                                let pid = c.id();
+                                unsafe {
+                                    libc::kill(pid as i32, libc::SIGTERM);
+                                }
+                            }
+
+                            let mut exited = false;
+                            for _ in 0..20 {
+                                // wait up to 2 seconds
+                                if let Ok(Some(_)) = c.try_wait() {
+                                    exited = true;
+                                    break;
+                                }
+                                std::thread::sleep(std::time::Duration::from_millis(100));
+                            }
+
+                            if !exited {
+                                let _ = c.kill();
+                                let _ = c.wait();
+                            }
+                        });
+                    }
+                    stack_for_btn.set_visible_child_name("editor");
+                });
+
+                container.append(&title);
+                container.append(&btn_disconnect);
+                container.append(&scroll);
+                stack.set_visible_child_name("external_session");
+
+                let child_arc_for_thread = child_arc.clone();
+                let tx_exit = tx.clone();
+
+                std::thread::spawn(move || loop {
                     std::thread::sleep(std::time::Duration::from_millis(500));
                     let mut opt = child_arc_for_thread.lock().unwrap();
                     if let Some(ref mut c) = *opt {
@@ -542,35 +550,34 @@ impl MainWindow {
                     } else {
                         break;
                     }
-                }
-            });
+                });
 
-            let buffer = log_view.buffer();
-            let title_for_exit = title.clone();
-            let btn_for_exit = btn_disconnect.clone();
+                let buffer = log_view.buffer();
+                let title_for_exit = title.clone();
+                let btn_for_exit = btn_disconnect.clone();
 
-            gtk::glib::MainContext::default().spawn_local(async move {
-                while let Ok(event) = rx.recv().await {
-                    match event {
-                        ExternalSessionEvent::Log(msg) => {
-                            let mut iter = buffer.end_iter();
-                            buffer.insert(&mut iter, &format!("{}\n", msg));
-                            let mark = buffer.create_mark(None, &buffer.end_iter(), false);
-                            log_view.scroll_to_mark(&mark, 0.0, true, 0.0, 1.0);
-                        }
-                        ExternalSessionEvent::Exit(success) => {
-                            if success {
-                                stack.set_visible_child_name("editor");
-                            } else {
-                                title_for_exit.set_label("Session Failed");
-                                title_for_exit.add_css_class("error");
-                                btn_for_exit.set_label("Close");
+                gtk::glib::MainContext::default().spawn_local(async move {
+                    while let Ok(event) = rx.recv().await {
+                        match event {
+                            ExternalSessionEvent::Log(msg) => {
+                                let mut iter = buffer.end_iter();
+                                buffer.insert(&mut iter, &format!("{}\n", msg));
+                                let mark = buffer.create_mark(None, &buffer.end_iter(), false);
+                                log_view.scroll_to_mark(&mark, 0.0, true, 0.0, 1.0);
+                            }
+                            ExternalSessionEvent::Exit(success) => {
+                                if success {
+                                    stack.set_visible_child_name("editor");
+                                } else {
+                                    title_for_exit.set_label("Session Failed");
+                                    title_for_exit.add_css_class("error");
+                                    btn_for_exit.set_label("Close");
+                                }
                             }
                         }
                     }
-                }
+                });
             });
-        });
 
         let state_for_launch = state.clone();
         let toast_overlay_for_launch = toast_overlay.clone();
@@ -581,18 +588,28 @@ impl MainWindow {
 
             let launch_result = match conn.protocol {
                 Protocol::Rdp | Protocol::Xrdp => {
-                    let pass_opt = if pass.is_empty() { None } else { Some(pass.as_str()) };
+                    let pass_opt = if pass.is_empty() {
+                        None
+                    } else {
+                        Some(pass.as_str())
+                    };
                     crate::launcher::launch_rdp(&conn, pass_opt)
                 }
-                Protocol::Ssh => {
-                    launcher::launch_ssh(&conn)
-                }
+                Protocol::Ssh => launcher::launch_ssh(&conn),
                 Protocol::Spice => {
-                    let pass_opt = if pass.is_empty() { None } else { Some(pass.as_str()) };
+                    let pass_opt = if pass.is_empty() {
+                        None
+                    } else {
+                        Some(pass.as_str())
+                    };
                     launcher::launch_spice(&conn, pass_opt)
                 }
                 Protocol::Vnc => {
-                    let pass_opt = if pass.is_empty() { None } else { Some(pass.as_str()) };
+                    let pass_opt = if pass.is_empty() {
+                        None
+                    } else {
+                        Some(pass.as_str())
+                    };
                     launcher::launch_vnc(&conn, pass_opt)
                 }
             };
@@ -602,7 +619,8 @@ impl MainWindow {
                     track_session_for_launch(child, conn.name.clone());
                 }
                 Err(err) => {
-                    toast_overlay_for_launch.add_toast(adw::Toast::new(&format!("Connection failed: {}", err)));
+                    toast_overlay_for_launch
+                        .add_toast(adw::Toast::new(&format!("Connection failed: {}", err)));
                 }
             }
         });
@@ -623,7 +641,12 @@ impl MainWindow {
                 let conn_id = row.widget_name().to_string();
                 state_for_select.borrow_mut().selected_id = Some(conn_id.clone());
 
-                let conn_opt = state_for_select.borrow().connections.iter().find(|c| c.id == conn_id).cloned();
+                let conn_opt = state_for_select
+                    .borrow()
+                    .connections
+                    .iter()
+                    .find(|c| c.id == conn_id)
+                    .cloned();
                 if let Some(conn) = conn_opt {
                     let password = secrets::get_password_sync(&conn.id)
                         .unwrap_or(None)
@@ -635,7 +658,12 @@ impl MainWindow {
                     let row_on_save = row.clone();
                     let on_save = move |updated_conn: Connection, updated_pass: String| {
                         // 1. Update connection vector
-                        if let Some(c) = state_on_save.borrow_mut().connections.iter_mut().find(|c| c.id == updated_conn.id) {
+                        if let Some(c) = state_on_save
+                            .borrow_mut()
+                            .connections
+                            .iter_mut()
+                            .find(|c| c.id == updated_conn.id)
+                        {
                             *c = updated_conn.clone();
                         }
                         let _ = storage::save_connections(&state_on_save.borrow().connections);
@@ -687,7 +715,10 @@ impl MainWindow {
                         list_box_on_dup.invalidate_headers();
 
                         list_box_on_dup.select_row(Some(&new_row));
-                        window_title_on_dup.set_subtitle(&format!("{} connections", state_on_dup.borrow().connections.len()));
+                        window_title_on_dup.set_subtitle(&format!(
+                            "{} connections",
+                            state_on_dup.borrow().connections.len()
+                        ));
                     };
 
                     let state_on_del = state_for_select.clone();
@@ -695,13 +726,19 @@ impl MainWindow {
                     let window_title_on_del = window_title.clone();
                     let row_on_del = row.clone();
                     let on_delete = move |del_id: String| {
-                        state_on_del.borrow_mut().connections.retain(|c| c.id != del_id);
+                        state_on_del
+                            .borrow_mut()
+                            .connections
+                            .retain(|c| c.id != del_id);
                         let _ = storage::save_connections(&state_on_del.borrow().connections);
                         let _ = secrets::delete_password_sync(&del_id);
 
                         list_box_on_del.remove(&row_on_del);
                         list_box_on_del.unselect_all();
-                        window_title_on_del.set_subtitle(&format!("{} connections", state_on_del.borrow().connections.len()));
+                        window_title_on_del.set_subtitle(&format!(
+                            "{} connections",
+                            state_on_del.borrow().connections.len()
+                        ));
                     };
 
                     let on_wake = move |mac: String| {
@@ -731,9 +768,10 @@ impl MainWindow {
         let auto_connect_target = {
             let st = state.borrow();
             if st.config.auto_connect_last {
-                st.config.last_connected_id.as_ref().and_then(|last_id| {
-                    st.connections.iter().find(|c| &c.id == last_id).cloned()
-                })
+                st.config
+                    .last_connected_id
+                    .as_ref()
+                    .and_then(|last_id| st.connections.iter().find(|c| &c.id == last_id).cloned())
             } else {
                 None
             }
@@ -764,8 +802,16 @@ impl MainWindow {
 fn setup_group_headers(list_box: &gtk::ListBox, state: Rc<RefCell<AppWindowState>>) {
     list_box.set_header_func(move |row, before| {
         let st = state.borrow();
-        let conn = st.connections.iter().find(|c| c.id == row.widget_name().as_str());
-        let before_conn = before.and_then(|b| st.connections.iter().find(|c| c.id == b.widget_name().as_str()).cloned());
+        let conn = st
+            .connections
+            .iter()
+            .find(|c| c.id == row.widget_name().as_str());
+        let before_conn = before.and_then(|b| {
+            st.connections
+                .iter()
+                .find(|c| c.id == b.widget_name().as_str())
+                .cloned()
+        });
 
         let current_group = conn.map(|c| c.group.as_str()).unwrap_or("Default");
         let prev_group = before_conn.as_ref().map(|c| c.group.as_str());
@@ -790,8 +836,14 @@ fn setup_group_headers(list_box: &gtk::ListBox, state: Rc<RefCell<AppWindowState
 fn setup_sorting(list_box: &gtk::ListBox, state: Rc<RefCell<AppWindowState>>) {
     list_box.set_sort_func(move |row1, row2| {
         let st = state.borrow();
-        let c1 = st.connections.iter().find(|c| c.id == row1.widget_name().as_str());
-        let c2 = st.connections.iter().find(|c| c.id == row2.widget_name().as_str());
+        let c1 = st
+            .connections
+            .iter()
+            .find(|c| c.id == row1.widget_name().as_str());
+        let c2 = st
+            .connections
+            .iter()
+            .find(|c| c.id == row2.widget_name().as_str());
 
         match (c1, c2) {
             (Some(a), Some(b)) => {
@@ -807,7 +859,11 @@ fn setup_sorting(list_box: &gtk::ListBox, state: Rc<RefCell<AppWindowState>>) {
     });
 }
 
-fn setup_filtering(list_box: &gtk::ListBox, search_entry: &gtk::SearchEntry, state: Rc<RefCell<AppWindowState>>) {
+fn setup_filtering(
+    list_box: &gtk::ListBox,
+    search_entry: &gtk::SearchEntry,
+    state: Rc<RefCell<AppWindowState>>,
+) {
     let state_for_filter = state.clone();
     list_box.set_filter_func(move |row| {
         let st = state_for_filter.borrow();
@@ -816,7 +872,11 @@ fn setup_filtering(list_box: &gtk::ListBox, search_entry: &gtk::SearchEntry, sta
             return true;
         }
 
-        if let Some(c) = st.connections.iter().find(|c| c.id == row.widget_name().as_str()) {
+        if let Some(c) = st
+            .connections
+            .iter()
+            .find(|c| c.id == row.widget_name().as_str())
+        {
             c.name.to_lowercase().contains(&query)
                 || c.host.to_lowercase().contains(&query)
                 || c.group.to_lowercase().contains(&query)

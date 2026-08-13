@@ -3,8 +3,8 @@ pub mod models;
 pub mod network;
 pub mod secrets;
 pub mod storage;
-pub mod ui;
 pub mod tray;
+pub mod ui;
 
 pub use models::{AdvancedSettings, AppConfig, Connection, Protocol, VncColorLevel};
 pub use secrets::{

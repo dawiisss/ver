@@ -37,8 +37,7 @@ pub fn to_json_4spaces<T: Serialize + ?Sized>(data: &T) -> Result<String> {
     data.serialize(&mut serializer)
         .context("Failed to serialize data to JSON with 4-space indent")?;
     buf.push(b'\n');
-    let json_str = String::from_utf8(buf)
-        .context("Serialized JSON is not valid UTF-8")?;
+    let json_str = String::from_utf8(buf).context("Serialized JSON is not valid UTF-8")?;
     Ok(json_str)
 }
 
@@ -104,9 +103,11 @@ pub fn save_connections_to_path(path: &Path, connections: &[Connection]) -> Resu
     let json_str = to_json_4spaces(connections)?;
     let mut temp_file = tempfile::NamedTempFile::new_in(parent)
         .with_context(|| format!("Failed to create temp file in {:?}", parent))?;
-    temp_file.write_all(json_str.as_bytes())
+    temp_file
+        .write_all(json_str.as_bytes())
         .with_context(|| format!("Failed to write to temp file for {:?}", path))?;
-    temp_file.persist(path)
+    temp_file
+        .persist(path)
         .map_err(|e| e.error)
         .with_context(|| format!("Failed to persist temp file to {:?}", path))?;
     Ok(())
@@ -168,9 +169,11 @@ pub fn save_config_to_path(path: &Path, config: &AppConfig) -> Result<()> {
     let json_str = to_json_4spaces(config)?;
     let mut temp_file = tempfile::NamedTempFile::new_in(parent)
         .with_context(|| format!("Failed to create temp file in {:?}", parent))?;
-    temp_file.write_all(json_str.as_bytes())
+    temp_file
+        .write_all(json_str.as_bytes())
         .with_context(|| format!("Failed to write to temp file for {:?}", path))?;
-    temp_file.persist(path)
+    temp_file
+        .persist(path)
         .map_err(|e| e.error)
         .with_context(|| format!("Failed to persist temp file to {:?}", path))?;
     Ok(())
@@ -210,8 +213,16 @@ mod tests {
 
         let lines: Vec<&str> = json_str.lines().collect();
         assert!(lines.len() > 5);
-        assert!(lines[1].starts_with("    {"), "Line 1 must start with 4 spaces: '{}'", lines[1]);
-        assert!(lines[2].starts_with("        \"id\":"), "Line 2 must start with 8 spaces: '{}'", lines[2]);
+        assert!(
+            lines[1].starts_with("    {"),
+            "Line 1 must start with 4 spaces: '{}'",
+            lines[1]
+        );
+        assert!(
+            lines[2].starts_with("        \"id\":"),
+            "Line 2 must start with 8 spaces: '{}'",
+            lines[2]
+        );
     }
 
     #[test]
@@ -236,7 +247,10 @@ mod tests {
         assert!(file_path.exists());
 
         let loaded = load_connections_from_path(&file_path).expect("Load must succeed");
-        assert_eq!(original, loaded, "Loaded connections must match original exactly");
+        assert_eq!(
+            original, loaded,
+            "Loaded connections must match original exactly"
+        );
     }
 
     #[test]
@@ -256,14 +270,20 @@ mod tests {
 
         fs::write(&corrupted_path, "{ invalid json content ...").unwrap();
 
-        let loaded = load_connections_from_path(&corrupted_path).expect("Should recover gracefully");
+        let loaded =
+            load_connections_from_path(&corrupted_path).expect("Should recover gracefully");
         assert!(loaded.is_empty());
 
         let entries = fs::read_dir(dir.path()).unwrap();
         let backup_exists = entries.filter_map(|e| e.ok()).any(|e| {
-            e.file_name().to_string_lossy().contains("corrupted.json.corrupt.")
+            e.file_name()
+                .to_string_lossy()
+                .contains("corrupted.json.corrupt.")
         });
-        assert!(backup_exists, "Corrupt backup file should have been created");
+        assert!(
+            backup_exists,
+            "Corrupt backup file should have been created"
+        );
     }
 
     #[test]
@@ -284,7 +304,11 @@ mod tests {
     #[test]
     fn test_dir_autocreate_on_save() {
         let dir = tempdir().expect("Failed to create temp dir");
-        let nested_path = dir.path().join("sub").join("folder").join("connections.json");
+        let nested_path = dir
+            .path()
+            .join("sub")
+            .join("folder")
+            .join("connections.json");
 
         let conn = Connection::default();
         save_connections_to_path(&nested_path, &[conn]).expect("Save to nested path must succeed");
@@ -298,13 +322,19 @@ mod tests {
 
         fs::write(&bin_path, &[0xFF, 0xFE, 0xFD, 0xFC, 0x00, 0x01]).unwrap();
 
-        let loaded = load_connections_from_path(&bin_path).expect("Should recover gracefully from non-UTF8 binary");
+        let loaded = load_connections_from_path(&bin_path)
+            .expect("Should recover gracefully from non-UTF8 binary");
         assert!(loaded.is_empty());
 
         let entries = fs::read_dir(dir.path()).unwrap();
         let backup_exists = entries.filter_map(|e| e.ok()).any(|e| {
-            e.file_name().to_string_lossy().contains("binary.json.corrupt.")
+            e.file_name()
+                .to_string_lossy()
+                .contains("binary.json.corrupt.")
         });
-        assert!(backup_exists, "Corrupt backup file should have been created for non-UTF8 binary");
+        assert!(
+            backup_exists,
+            "Corrupt backup file should have been created for non-UTF8 binary"
+        );
     }
 }

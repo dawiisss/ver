@@ -4,8 +4,8 @@ use beautiful_goodall::launcher::{
 };
 use beautiful_goodall::models::{Connection, Protocol};
 use beautiful_goodall::network::{
-    build_wol_packet, build_wol_packet_bytes, parse_mac_address, send_wol_to, DEFAULT_BROADCAST_ADDR,
-    DEFAULT_WOL_PORT,
+    build_wol_packet, build_wol_packet_bytes, parse_mac_address, send_wol_to,
+    DEFAULT_BROADCAST_ADDR, DEFAULT_WOL_PORT,
 };
 use std::net::UdpSocket;
 use std::time::Duration;
@@ -34,7 +34,11 @@ fn test_wol_packet_binary_format_exhaustive() {
         assert_eq!(parsed, expected_mac);
 
         let packet = build_wol_packet(mac_str).expect("Building WoL packet must succeed");
-        assert_eq!(packet.len(), 102, "WoL packet length must be exactly 102 bytes");
+        assert_eq!(
+            packet.len(),
+            102,
+            "WoL packet length must be exactly 102 bytes"
+        );
 
         // Verify prefix: 6 bytes of 0xFF
         assert_eq!(&packet[0..6], &[0xFF; 6], "Prefix must be 6 bytes of 0xFF");
@@ -65,7 +69,9 @@ fn test_wol_packet_binary_format_exhaustive() {
 #[test]
 fn test_wol_send_to_loopback_socket_binding_and_payload() {
     let rx_socket = UdpSocket::bind("127.0.0.1:0").expect("Binding receiver socket must succeed");
-    let rx_addr = rx_socket.local_addr().expect("Getting local socket address must succeed");
+    let rx_addr = rx_socket
+        .local_addr()
+        .expect("Getting local socket address must succeed");
     rx_socket
         .set_read_timeout(Some(Duration::from_millis(1000)))
         .expect("Setting timeout must succeed");
@@ -75,12 +81,20 @@ fn test_wol_send_to_loopback_socket_binding_and_payload() {
     let expected_mac = [0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF];
 
     let result = send_wol_to(mac, &dest);
-    assert!(result.is_ok(), "send_wol_to to loopback destination should return Ok");
+    assert!(
+        result.is_ok(),
+        "send_wol_to to loopback destination should return Ok"
+    );
 
     let mut buf = [0u8; 512];
-    let (amt, src) = rx_socket.recv_from(&mut buf).expect("Must receive UDP WoL packet on loopback");
+    let (amt, src) = rx_socket
+        .recv_from(&mut buf)
+        .expect("Must receive UDP WoL packet on loopback");
 
-    assert_eq!(amt, 102, "Received WoL packet payload must be exactly 102 bytes");
+    assert_eq!(
+        amt, 102,
+        "Received WoL packet payload must be exactly 102 bytes"
+    );
     assert_eq!(&buf[0..6], &[0xFF; 6], "First 6 bytes must be 0xFF");
 
     for i in 0..16 {
@@ -108,7 +122,10 @@ fn test_terminal_emulator_path_resolution_and_stdio_flags() {
     assert_eq!(default_ssh_args, vec!["ssh", "alice@test.server.org"]);
 
     let id_ssh_args = build_ssh_args_with_identity(&conn, Some("/tmp/id_rsa"));
-    assert_eq!(id_ssh_args, vec!["ssh", "-i", "/tmp/id_rsa", "alice@test.server.org"]);
+    assert_eq!(
+        id_ssh_args,
+        vec!["ssh", "-i", "/tmp/id_rsa", "alice@test.server.org"]
+    );
 
     let mut rdp_conn = Connection::default();
     rdp_conn.protocol = Protocol::Rdp;
@@ -124,7 +141,10 @@ fn test_terminal_emulator_path_resolution_and_stdio_flags() {
         assert_eq!(cmd.get_program(), term);
 
         // Inspect command arguments
-        let args: Vec<String> = cmd.get_args().map(|a| a.to_string_lossy().to_string()).collect();
+        let args: Vec<String> = cmd
+            .get_args()
+            .map(|a| a.to_string_lossy().to_string())
+            .collect();
         match term {
             "ptyxis" | "gnome-terminal" => {
                 assert_eq!(args[0], "--");
@@ -145,7 +165,10 @@ fn test_terminal_emulator_path_resolution_and_stdio_flags() {
 
     // Verify find_binary_in_path finds sh/bash
     let sh_path = find_binary_in_path("sh");
-    assert!(sh_path.is_some(), "System binary 'sh' should be found in PATH");
+    assert!(
+        sh_path.is_some(),
+        "System binary 'sh' should be found in PATH"
+    );
     assert!(sh_path.unwrap().is_file());
 
     // Verify detect_terminal_emulator returns Some or None cleanly without panicking

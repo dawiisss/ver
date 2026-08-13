@@ -16,27 +16,39 @@ pub async fn get_password(id: &str) -> Result<Option<String>> {
 
     // Primary search using "service" and "connection_id"
     let items = keyring
-        .search_items(&HashMap::from([("service", SERVICE_NAME), ("connection_id", id)]))
+        .search_items(&HashMap::from([
+            ("service", SERVICE_NAME),
+            ("connection_id", id),
+        ]))
         .await
         .context("Failed to search secret keyring for connection password")?;
 
     if let Some(item) = items.first() {
-        let secret_bytes = item.secret().await.context("Failed to retrieve secret bytes")?;
-        let password = String::from_utf8(secret_bytes.to_vec())
-            .context("Secret is not valid UTF-8")?;
+        let secret_bytes = item
+            .secret()
+            .await
+            .context("Failed to retrieve secret bytes")?;
+        let password =
+            String::from_utf8(secret_bytes.to_vec()).context("Secret is not valid UTF-8")?;
         return Ok(Some(password));
     }
 
     // Legacy fallback search matching Python keyring attributes ("username" = id)
     let legacy_items = keyring
-        .search_items(&HashMap::from([("service", SERVICE_NAME), ("username", id)]))
+        .search_items(&HashMap::from([
+            ("service", SERVICE_NAME),
+            ("username", id),
+        ]))
         .await
         .unwrap_or_default();
 
     if let Some(item) = legacy_items.first() {
-        let secret_bytes = item.secret().await.context("Failed to retrieve secret bytes")?;
-        let password = String::from_utf8(secret_bytes.to_vec())
-            .context("Secret is not valid UTF-8")?;
+        let secret_bytes = item
+            .secret()
+            .await
+            .context("Failed to retrieve secret bytes")?;
+        let password =
+            String::from_utf8(secret_bytes.to_vec()).context("Secret is not valid UTF-8")?;
         return Ok(Some(password));
     }
 
@@ -80,7 +92,10 @@ pub async fn delete_password(id: &str) -> Result<()> {
     };
 
     let items = keyring
-        .search_items(&HashMap::from([("service", SERVICE_NAME), ("connection_id", id)]))
+        .search_items(&HashMap::from([
+            ("service", SERVICE_NAME),
+            ("connection_id", id),
+        ]))
         .await
         .unwrap_or_default();
 
@@ -89,7 +104,10 @@ pub async fn delete_password(id: &str) -> Result<()> {
     }
 
     let legacy_items = keyring
-        .search_items(&HashMap::from([("service", SERVICE_NAME), ("username", id)]))
+        .search_items(&HashMap::from([
+            ("service", SERVICE_NAME),
+            ("username", id),
+        ]))
         .await
         .unwrap_or_default();
 
