@@ -8,14 +8,14 @@ use libadwaita::prelude::*;
 use libadwaita as adw;
 
 use crate::launcher;
-use crate::models::{AppConfig, Connection, Protocol, VncScaling};
+use crate::models::{AppConfig, Connection, Protocol};
 use crate::network;
 use crate::secrets;
 use crate::storage;
 use crate::ui::discovery::DiscoveryDialog;
 use crate::ui::editor::ConnectionEditor;
 use crate::ui::preferences::{apply_theme, PreferencesWindow};
-use crate::vnc::{VncClient, VncCommand, VncSessionEvent, VncWidget};
+
 
 
 
@@ -197,13 +197,8 @@ impl MainWindow {
         editor_container.set_vexpand(true);
         editor_container.set_hexpand(true);
 
-        let vnc_container = gtk::Box::new(gtk::Orientation::Vertical, 0);
-        vnc_container.set_vexpand(true);
-        vnc_container.set_hexpand(true);
-
         content_stack.add_named(&status_page, Some("welcome"));
         content_stack.add_named(&editor_container, Some("editor"));
-        content_stack.add_named(&vnc_container, Some("vnc_session"));
         
         // External Session Tracker Container
         let external_session_container = gtk::Box::new(gtk::Orientation::Vertical, 0);
@@ -386,9 +381,7 @@ impl MainWindow {
         let list_box_for_select = list_box.clone();
         let window_title_for_select = window_title.clone();
         
-        let window_for_select = window.clone();
-        let header_bar_for_select = header_bar.clone();
-        let sidebar_box_for_select = sidebar_box.clone();
+
 
         list_box.connect_row_selected(move |_, row_opt| {
             while let Some(child) = editor_container_for_select.first_child() {
@@ -588,13 +581,6 @@ impl MainWindow {
                         });
                     };
 
-                    let vnc_container_for_connect = vnc_container.clone();
-                    let content_stack_on_connect = content_stack_for_select.clone();
-                    
-                    let window_for_vnc = window_for_select.clone();
-                    let header_bar_for_vnc = header_bar_for_select.clone();
-                    let sidebar_box_for_vnc = sidebar_box_for_select.clone();
-
                     let on_connect = move |conn: Connection, pass: String| {
                         match conn.protocol {
                             Protocol::Rdp | Protocol::Xrdp => {
@@ -615,183 +601,9 @@ impl MainWindow {
                                 }
                             }
                             Protocol::Vnc => {
-                                // Clear prior VNC session widgets
-                                while let Some(child) = vnc_container_for_connect.first_child() {
-                                    vnc_container_for_connect.remove(&child);
+                                if let Ok(child) = launcher::launch_vnc(&conn) {
+                                    track_external_session(child, conn.name.clone());
                                 }
-
-                                let vnc_overlay = gtk::Overlay::builder().build();
-                                vnc_container_for_connect.append(&vnc_overlay);
-
-                                let toolbar = gtk::FlowBox::builder()
-                                    .selection_mode(gtk::SelectionMode::None)
-                                    .column_spacing(8)
-                                    .row_spacing(8)
-                                    .build();
-                                toolbar.set_margin_top(8);
-                                toolbar.set_margin_bottom(8);
-                                toolbar.set_margin_start(12);
-                                toolbar.set_margin_end(12);
-
-                                let status_label = gtk::Label::builder()
-                                    .label(format!("Connecting to {}:{}...", conn.host, conn.port))
-                                    .hexpand(true)
-                                    .xalign(0.0)
-                                    .wrap(true)
-                                    .wrap_mode(gtk::pango::WrapMode::WordChar)
-                                    .css_classes(vec!["title-4"])
-                                    .build();
-
-                                let scaling_model = gtk::StringList::new(&["Original Size", "Fit to Window", "Stretch"]);
-                                let scaling_idx = match conn.advanced_settings.vnc_scaling {
-                                    VncScaling::OriginalSize => 0,
-                                    VncScaling::FitToWindow => 1,
-                                    VncScaling::Stretch => 2,
-                                };
-                                let combo_scaling = gtk::DropDown::builder()
-                                    .model(&scaling_model)
-                                    .selected(scaling_idx)
-                                    .build();
-
-                                let btn_cad = gtk::Button::builder()
-                                    .label("Ctrl+Alt+Del")
-                                    .tooltip_text("Send Ctrl+Alt+Del key sequence")
-                                    .build();
-
-                                let btn_fullscreen = gtk::Button::builder()
-                                    .label("Fullscreen")
-                                    .tooltip_text("Toggle Fullscreen")
-                                    .css_classes(vec!["suggested-action"])
-                                    .build();
-
-                                let btn_disconnect = gtk::Button::builder()
-                                    .label("Disconnect VNC")
-                                    .css_classes(vec!["destructive-action"])
-                                    .build();
-
-                                toolbar.insert(&status_label, -1);
-                                toolbar.insert(&combo_scaling, -1);
-                                toolbar.insert(&btn_cad, -1);
-                                toolbar.insert(&btn_fullscreen, -1);
-                                toolbar.insert(&btn_disconnect, -1);
-
-                                let toolbar_revealer = gtk::Revealer::builder()
-                                    .child(&toolbar)
-                                    .reveal_child(true)
-                                    .transition_type(gtk::RevealerTransitionType::SlideDown)
-                                    .halign(gtk::Align::Fill)
-                                    .valign(gtk::Align::Start)
-                                    .build();
-
-                                vnc_overlay.add_overlay(&toolbar_revealer);
-
-                                let scaling = conn.advanced_settings.vnc_scaling.clone();
-                                let encoding = conn.advanced_settings.vnc_encoding.clone();
-                                let client = VncClient::new(conn.host.clone(), conn.port, scaling.clone(), encoding);
-                                let vnc_widget = VncWidget::new(scaling);
-                                let vnc_widget_rc = Rc::new(RefCell::new(vnc_widget));
-
-                                if let Some(scrolled) = vnc_widget_rc.borrow().widget() {
-                                    vnc_overlay.set_child(Some(scrolled));
-                                    vnc_widget_rc.borrow().setup_event_controllers(vnc_widget_rc.clone());
-                                }
-
-                                // Fullscreen toggle logic
-                                let is_fs = Rc::new(RefCell::new(false));
-                                let win_fs = window_for_vnc.clone();
-                                let header_fs = header_bar_for_vnc.clone();
-                                let sidebar_fs = sidebar_box_for_vnc.clone();
-                                let rev_fs = toolbar_revealer.clone();
-
-                                let btn_fs_clone = btn_fullscreen.clone();
-                                let is_fs_clone = is_fs.clone();
-                                btn_fullscreen.connect_clicked(move |_| {
-                                    let current = *is_fs_clone.borrow();
-                                    if !current {
-                                        win_fs.fullscreen();
-                                        header_fs.set_visible(false);
-                                        sidebar_fs.set_visible(false);
-                                        btn_fs_clone.set_label("Restore");
-                                        rev_fs.set_reveal_child(false);
-                                    } else {
-                                        win_fs.unfullscreen();
-                                        header_fs.set_visible(true);
-                                        sidebar_fs.set_visible(true);
-                                        btn_fs_clone.set_label("Fullscreen");
-                                        rev_fs.set_reveal_child(true);
-                                    }
-                                    *is_fs_clone.borrow_mut() = !current;
-                                });
-
-                                // Hover detection
-                                let motion = gtk::EventControllerMotion::new();
-                                let rev_motion = toolbar_revealer.clone();
-                                let is_fs_motion = is_fs.clone();
-                                motion.connect_motion(move |_, _x, y| {
-                                    if *is_fs_motion.borrow() {
-                                        if y < 60.0 {
-                                            rev_motion.set_reveal_child(true);
-                                        } else {
-                                            rev_motion.set_reveal_child(false);
-                                        }
-                                    }
-                                });
-                                vnc_overlay.add_controller(motion);
-
-                                #[allow(deprecated)]
-                                let (glib_tx, glib_rx) = glib::MainContext::channel::<VncSessionEvent>(glib::Priority::default());
-                                let pass_opt = if pass.is_empty() { None } else { Some(pass.clone()) };
-                                let cmd_tx = client.start_session(pass_opt, glib_tx);
-                                vnc_widget_rc.borrow_mut().set_cmd_tx(cmd_tx.clone());
-
-                                let widget_for_scaling = vnc_widget_rc.clone();
-                                combo_scaling.connect_selected_notify(move |dropdown| {
-                                    let mode = match dropdown.selected() {
-                                        1 => VncScaling::FitToWindow,
-                                        2 => VncScaling::Stretch,
-                                        _ => VncScaling::OriginalSize,
-                                    };
-                                    widget_for_scaling.borrow_mut().set_scaling(mode);
-                                });
-
-                                let cmd_tx_cad = cmd_tx.clone();
-                                btn_cad.connect_clicked(move |_| {
-                                    let _ = cmd_tx_cad.send(VncCommand::KeyEvent { keysym: 0xFFE3, down: true });
-                                    let _ = cmd_tx_cad.send(VncCommand::KeyEvent { keysym: 0xFFE9, down: true });
-                                    let _ = cmd_tx_cad.send(VncCommand::KeyEvent { keysym: 0xFFFF, down: true });
-                                    let _ = cmd_tx_cad.send(VncCommand::KeyEvent { keysym: 0xFFFF, down: false });
-                                    let _ = cmd_tx_cad.send(VncCommand::KeyEvent { keysym: 0xFFE9, down: false });
-                                    let _ = cmd_tx_cad.send(VncCommand::KeyEvent { keysym: 0xFFE3, down: false });
-                                });
-
-                                let cmd_tx_disc = cmd_tx.clone();
-                                let stack_disc = content_stack_on_connect.clone();
-                                btn_disconnect.connect_clicked(move |_| {
-                                    let _ = cmd_tx_disc.send(VncCommand::Disconnect);
-                                    stack_disc.set_visible_child_name("editor");
-                                });
-
-                                let widget_rx = vnc_widget_rc.clone();
-                                let label_rx = status_label.clone();
-                                glib_rx.attach(None, move |event| {
-                                    match event {
-                                        VncSessionEvent::Connected { width, height, name } => {
-                                            label_rx.set_label(&format!("Connected: {} ({}x{})", name, width, height));
-                                        }
-                                        VncSessionEvent::FrameUpdate(frame) => {
-                                            widget_rx.borrow_mut().render_frame(frame);
-                                        }
-                                        VncSessionEvent::Disconnected(msg) => {
-                                            label_rx.set_label(&format!("Disconnected: {}", msg));
-                                        }
-                                        VncSessionEvent::Error(err) => {
-                                            label_rx.set_label(&format!("Error: {}", err));
-                                        }
-                                    }
-                                    glib::ControlFlow::Continue
-                                });
-
-                                content_stack_on_connect.set_visible_child_name("vnc_session");
                             }
                         }
                     };

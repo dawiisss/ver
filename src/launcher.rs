@@ -299,6 +299,55 @@ pub fn build_spice_args(conn: &Connection) -> Vec<String> {
     args
 }
 
+pub fn build_vnc_args(conn: &Connection) -> Vec<String> {
+    let mut args = vec![];
+    
+    if conn.advanced_settings.vnc_viewonly {
+        args.push("-ViewOnly".to_string());
+    }
+    
+    if conn.advanced_settings.vnc_shared {
+        args.push("-Shared".to_string());
+    }
+
+    use crate::models::VncEncodingOption;
+    match conn.advanced_settings.vnc_encoding {
+        VncEncodingOption::Tight => args.push("-PreferredEncoding=Tight".to_string()),
+        VncEncodingOption::Zrle => args.push("-PreferredEncoding=ZRLE".to_string()),
+        VncEncodingOption::Raw => args.push("-PreferredEncoding=Raw".to_string()),
+        VncEncodingOption::Auto => {} // Auto is TigerVNC default
+    }
+
+    let resolved_port = conn.resolve_port();
+    let port_to_use = if resolved_port == 0 { 5900 } else { resolved_port };
+    args.push(format!("{}:{}", conn.host.trim(), port_to_use));
+    
+    args
+}
+
+pub fn launch_vnc(conn: &Connection) -> Result<Child, String> {
+    if conn.host.trim().is_empty() {
+        return Err("Connection host cannot be empty".to_string());
+    }
+
+    let args = build_vnc_args(conn);
+    let mut cmd = Command::new("vncviewer");
+
+    cmd.args(&args)
+       .stdin(Stdio::null())
+       .stdout(Stdio::piped())
+       .stderr(Stdio::piped());
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        cmd.process_group(0);
+    }
+
+    cmd.spawn()
+       .map_err(|e| format!("Failed to spawn vncviewer process: {}", e))
+}
+
 /// Spawns a `remote-viewer` SPICE session detached from parent process group.
 pub fn launch_spice(conn: &Connection, password: Option<&str>) -> Result<Child, String> {
     if conn.host.trim().is_empty() {

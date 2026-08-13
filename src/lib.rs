@@ -5,7 +5,6 @@ pub mod secrets;
 pub mod storage;
 pub mod ui;
 pub mod tray;
-pub mod vnc;
 
 pub use models::{AdvancedSettings, AppConfig, Connection, Protocol, VncScaling};
 pub use secrets::{
