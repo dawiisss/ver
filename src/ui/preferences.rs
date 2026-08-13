@@ -5,7 +5,7 @@ use gtk::prelude::*;
 use libadwaita::prelude::*;
 use libadwaita as adw;
 
-use crate::models::{AppConfig, Protocol, VncScaling};
+use crate::models::{AppConfig, Protocol, VncColorLevel};
 use crate::storage::save_config;
 
 pub fn apply_theme(theme_str: &str) {
@@ -141,32 +141,34 @@ impl PreferencesWindow {
 
         group_defaults.add(&switch_autoconnect);
 
-        // Default VNC Scaling
-        let scaling_model = gtk::StringList::new(&["Original Size", "Fit to Window", "Stretch"]);
-        let default_scaling_idx = match config.borrow().default_vnc_scaling {
-            VncScaling::OriginalSize => 0,
-            VncScaling::FitToWindow => 1,
-            VncScaling::Stretch => 2,
+        // Default VNC Color Level
+        let color_model = gtk::StringList::new(&["Full Color (Default)", "Medium", "Low", "Very Low"]);
+        let default_color_idx = match config.borrow().default_vnc_color_level {
+            VncColorLevel::Full => 0,
+            VncColorLevel::Medium => 1,
+            VncColorLevel::Low => 2,
+            VncColorLevel::VeryLow => 3,
         };
 
-        let combo_scaling = adw::ComboRow::builder()
-            .title("Default VNC Display Scaling")
-            .model(&scaling_model)
-            .selected(default_scaling_idx)
+        let combo_color = adw::ComboRow::builder()
+            .title("Default VNC Color Level")
+            .model(&color_model)
+            .selected(default_color_idx)
             .build();
 
         let config_clone_4 = config.clone();
-        combo_scaling.connect_selected_notify(move |row| {
-            let scaling = match row.selected() {
-                1 => VncScaling::FitToWindow,
-                2 => VncScaling::Stretch,
-                _ => VncScaling::OriginalSize,
+        combo_color.connect_selected_notify(move |row| {
+            let color_level = match row.selected() {
+                1 => VncColorLevel::Medium,
+                2 => VncColorLevel::Low,
+                3 => VncColorLevel::VeryLow,
+                _ => VncColorLevel::Full,
             };
-            config_clone_4.borrow_mut().default_vnc_scaling = scaling;
+            config_clone_4.borrow_mut().default_vnc_color_level = color_level;
             let _ = save_config(&config_clone_4.borrow());
         });
 
-        group_defaults.add(&combo_scaling);
+        group_defaults.add(&combo_color);
         page.add(&group_defaults);
 
         window.add(&page);

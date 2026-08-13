@@ -310,12 +310,36 @@ pub fn build_vnc_args(conn: &Connection) -> Vec<String> {
         args.push("-Shared".to_string());
     }
 
-    use crate::models::VncEncodingOption;
+    use crate::models::{VncEncodingOption, VncColorLevel};
     match conn.advanced_settings.vnc_encoding {
         VncEncodingOption::Tight => args.push("-PreferredEncoding=Tight".to_string()),
         VncEncodingOption::Zrle => args.push("-PreferredEncoding=ZRLE".to_string()),
         VncEncodingOption::Raw => args.push("-PreferredEncoding=Raw".to_string()),
         VncEncodingOption::Auto => {} // Auto is TigerVNC default
+    }
+
+    if conn.advanced_settings.vnc_fullscreen {
+        args.push("-FullScreen=1".to_string());
+    }
+
+    if !conn.advanced_settings.vnc_clipboard {
+        args.push("-AcceptClipboard=0".to_string());
+        args.push("-SendClipboard=0".to_string());
+    }
+
+    match conn.advanced_settings.vnc_color_level {
+        VncColorLevel::Full => args.push("-FullColor=1".to_string()),
+        VncColorLevel::Medium => args.push("-LowColorLevel=2".to_string()),
+        VncColorLevel::Low => args.push("-LowColorLevel=1".to_string()),
+        VncColorLevel::VeryLow => args.push("-LowColorLevel=0".to_string()),
+    }
+
+    if conn.advanced_settings.vnc_compress_level > 0 {
+        args.push(format!("-CompressLevel={}", conn.advanced_settings.vnc_compress_level));
+    }
+
+    if conn.advanced_settings.vnc_quality_level > 0 {
+        args.push(format!("-QualityLevel={}", conn.advanced_settings.vnc_quality_level));
     }
 
     let resolved_port = conn.resolve_port();

@@ -79,32 +79,35 @@ impl Default for RdpColorDepth {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum VncScaling {
-    #[serde(rename = "Original Size")]
-    OriginalSize,
-    #[serde(rename = "Fit to Window")]
-    FitToWindow,
-    #[serde(rename = "Stretch")]
-    Stretch,
+pub enum VncColorLevel {
+    #[serde(rename = "Full Color (Default)")]
+    Full,
+    #[serde(rename = "Medium")]
+    Medium,
+    #[serde(rename = "Low")]
+    Low,
+    #[serde(rename = "Very Low")]
+    VeryLow,
 }
 
-impl Default for VncScaling {
+impl Default for VncColorLevel {
     fn default() -> Self {
-        VncScaling::OriginalSize
+        VncColorLevel::Full
     }
 }
 
-impl VncScaling {
+impl VncColorLevel {
     pub fn as_str(&self) -> &'static str {
         match self {
-            VncScaling::OriginalSize => "Original Size",
-            VncScaling::FitToWindow => "Fit to Window",
-            VncScaling::Stretch => "Stretch",
+            VncColorLevel::Full => "Full Color (Default)",
+            VncColorLevel::Medium => "Medium",
+            VncColorLevel::Low => "Low",
+            VncColorLevel::VeryLow => "Very Low",
         }
     }
 }
 
-impl std::fmt::Display for VncScaling {
+impl std::fmt::Display for VncColorLevel {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.as_str())
     }
@@ -150,13 +153,22 @@ pub struct AdvancedSettings {
     pub rdp_audio: bool,
     pub vnc_viewonly: bool,
     pub vnc_shared: bool,
+    #[serde(default)]
+    pub vnc_fullscreen: bool,
+    #[serde(default)]
+    pub vnc_clipboard: bool, // true by default in builder
+    #[serde(default)]
+    pub vnc_color_level: VncColorLevel,
+    #[serde(default)]
+    pub vnc_encoding: VncEncodingOption,
+    #[serde(default)]
+    pub vnc_compress_level: u8, // 0 for auto, 1-9 for force
+    #[serde(default)]
+    pub vnc_quality_level: u8, // 0 for auto, 1-9 for force
     pub clipboard_sharing: bool,
     pub color_depth: u8,
     #[serde(default)]
     pub rdp_color_depth: RdpColorDepth,
-    pub vnc_scaling: VncScaling,
-    #[serde(default)]
-    pub vnc_encoding: VncEncodingOption,
     pub spice_fullscreen: bool,
     pub spice_usb_redirect: bool,
     pub spice_scale_to_window: bool,
@@ -183,8 +195,12 @@ impl Default for AdvancedSettings {
             clipboard_sharing: false,
             color_depth: 0,
             rdp_color_depth: RdpColorDepth::Automatic,
-            vnc_scaling: VncScaling::OriginalSize,
+            vnc_fullscreen: false,
+            vnc_clipboard: true,
+            vnc_color_level: VncColorLevel::Full,
             vnc_encoding: VncEncodingOption::Auto,
+            vnc_compress_level: 0,
+            vnc_quality_level: 0,
             spice_fullscreen: false,
             spice_usb_redirect: false,
             spice_scale_to_window: false,
@@ -347,7 +363,7 @@ pub struct AppConfig {
     pub theme: String,
     pub default_protocol: Protocol,
     pub auto_connect_last: bool,
-    pub default_vnc_scaling: VncScaling,
+    pub default_vnc_color_level: VncColorLevel,
     pub last_connected_id: Option<String>,
 }
 
@@ -357,7 +373,7 @@ impl Default for AppConfig {
             theme: default_theme(),
             default_protocol: Protocol::default(),
             auto_connect_last: false,
-            default_vnc_scaling: VncScaling::default(),
+            default_vnc_color_level: VncColorLevel::default(),
             last_connected_id: None,
         }
     }

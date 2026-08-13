@@ -6,7 +6,7 @@ pub mod storage;
 pub mod ui;
 pub mod tray;
 
-pub use models::{AdvancedSettings, AppConfig, Connection, Protocol, VncScaling};
+pub use models::{AdvancedSettings, AppConfig, Connection, Protocol, VncColorLevel};
 pub use secrets::{
     delete_password, delete_password_sync, get_password, get_password_sync, set_password,
     set_password_sync,

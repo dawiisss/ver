@@ -2,7 +2,7 @@ use gtk::prelude::*;
 use libadwaita::prelude::*;
 use libadwaita as adw;
 
-use crate::models::{AdvancedSettings, Connection, Protocol, VncScaling, RdpColorDepth, RdpNetworkProfile};
+use crate::models::{AdvancedSettings, Connection, Protocol, VncColorLevel, RdpColorDepth, RdpNetworkProfile};
 
 pub struct ConnectionEditor {
     pub connection: Connection,
@@ -242,17 +242,41 @@ impl ConnectionEditor {
             .title("Advanced VNC Settings")
             .build();
 
-        let scaling_model = gtk::StringList::new(&["Original Size", "Fit to Window", "Stretch"]);
-        let vnc_scaling_idx = match conn.advanced_settings.vnc_scaling {
-            VncScaling::OriginalSize => 0,
-            VncScaling::FitToWindow => 1,
-            VncScaling::Stretch => 2,
-        };
+        let switch_vnc_fullscreen = adw::SwitchRow::builder()
+            .title("Fullscreen")
+            .active(conn.advanced_settings.vnc_fullscreen)
+            .build();
 
-        let combo_vnc_scaling = adw::ComboRow::builder()
-            .title("VNC Display Scaling")
-            .model(&scaling_model)
-            .selected(vnc_scaling_idx)
+        let switch_vnc_clipboard = adw::SwitchRow::builder()
+            .title("Clipboard Sync")
+            .active(conn.advanced_settings.vnc_clipboard)
+            .build();
+
+        let color_model = gtk::StringList::new(&["Full Color (Default)", "Medium", "Low", "Very Low"]);
+        let vnc_color_idx = match conn.advanced_settings.vnc_color_level {
+            crate::models::VncColorLevel::Full => 0,
+            crate::models::VncColorLevel::Medium => 1,
+            crate::models::VncColorLevel::Low => 2,
+            crate::models::VncColorLevel::VeryLow => 3,
+        };
+        let combo_vnc_color = adw::ComboRow::builder()
+            .title("Color Level")
+            .model(&color_model)
+            .selected(vnc_color_idx)
+            .build();
+            
+        let compress_model = gtk::StringList::new(&["Auto (Default)", "1 (Fast)", "2", "3", "4", "5", "6", "7", "8", "9 (Best)"]);
+        let combo_vnc_compress = adw::ComboRow::builder()
+            .title("Compression Level")
+            .model(&compress_model)
+            .selected(conn.advanced_settings.vnc_compress_level as u32)
+            .build();
+
+        let quality_model = gtk::StringList::new(&["Auto (Default)", "1 (Low)", "2", "3", "4", "5", "6", "7", "8", "9 (High)"]);
+        let combo_vnc_quality = adw::ComboRow::builder()
+            .title("JPEG Quality Level")
+            .model(&quality_model)
+            .selected(conn.advanced_settings.vnc_quality_level as u32)
             .build();
 
         let switch_vnc_viewonly = adw::SwitchRow::builder()
@@ -279,7 +303,11 @@ impl ConnectionEditor {
             .selected(vnc_encoding_idx)
             .build();
 
-        group_vnc.add(&combo_vnc_scaling);
+        group_vnc.add(&switch_vnc_fullscreen);
+        group_vnc.add(&switch_vnc_clipboard);
+        group_vnc.add(&combo_vnc_color);
+        group_vnc.add(&combo_vnc_compress);
+        group_vnc.add(&combo_vnc_quality);
         group_vnc.add(&combo_vnc_encoding);
         group_vnc.add(&switch_vnc_viewonly);
         group_vnc.add(&switch_vnc_shared);
@@ -486,10 +514,11 @@ impl ConnectionEditor {
                 _ => Protocol::Rdp,
             };
 
-            let vnc_scaling = match combo_vnc_scaling.selected() {
-                1 => VncScaling::FitToWindow,
-                2 => VncScaling::Stretch,
-                _ => VncScaling::OriginalSize,
+            let vnc_color_level = match combo_vnc_color.selected() {
+                1 => crate::models::VncColorLevel::Medium,
+                2 => crate::models::VncColorLevel::Low,
+                3 => crate::models::VncColorLevel::VeryLow,
+                _ => crate::models::VncColorLevel::Full,
             };
 
             let vnc_encoding = match combo_vnc_encoding.selected() {
@@ -555,7 +584,11 @@ impl ConnectionEditor {
                     clipboard_sharing: switch_clipboard.is_active(),
                     color_depth: 0,
                     rdp_color_depth,
-                    vnc_scaling,
+                    vnc_fullscreen: switch_vnc_fullscreen.is_active(),
+                    vnc_clipboard: switch_vnc_clipboard.is_active(),
+                    vnc_color_level,
+                    vnc_compress_level: combo_vnc_compress.selected() as u8,
+                    vnc_quality_level: combo_vnc_quality.selected() as u8,
                     vnc_encoding,
                     spice_fullscreen: switch_spice_fullscreen.is_active(),
                     spice_usb_redirect: switch_spice_usb_redirect.is_active(),
