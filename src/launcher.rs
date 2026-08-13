@@ -349,12 +349,49 @@ pub fn build_vnc_args(conn: &Connection) -> Vec<String> {
     args
 }
 
-pub fn launch_vnc(conn: &Connection) -> Result<Child, String> {
+pub fn launch_vnc(conn: &Connection, password: Option<&str>) -> Result<Child, String> {
     if conn.host.trim().is_empty() {
         return Err("Connection host cannot be empty".to_string());
     }
 
-    let args = build_vnc_args(conn);
+    let mut args = build_vnc_args(conn);
+    
+    // Check if we have a password
+    let mut temp_file_path = None;
+    
+    if let Some(pass) = password.filter(|p| !p.is_empty()) {
+        // Use vncpasswd -f to encrypt the password
+        let mut vncpasswd = Command::new("vncpasswd")
+            .arg("-f")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .map_err(|e| format!("Failed to run vncpasswd: {}", e))?;
+            
+        {
+            use std::io::Write;
+            if let Some(mut stdin) = vncpasswd.stdin.take() {
+                let _ = stdin.write_all(pass.as_bytes());
+                let _ = stdin.write_all(b"\n");
+                let _ = stdin.write_all(pass.as_bytes()); // vncpasswd usually prompts twice, but -f mode reads 8 chars max per line? Actually -f reads one password
+                let _ = stdin.write_all(b"\n");
+            }
+        }
+        
+        let output = vncpasswd.wait_with_output().map_err(|e| format!("vncpasswd failed: {}", e))?;
+        if output.status.success() {
+            // Write to a temporary file
+            let uuid = uuid::Uuid::new_v4().to_string();
+            let path = format!("/tmp/ver_vnc_{}.pwd", uuid);
+            if std::fs::write(&path, output.stdout).is_ok() {
+                args.push("-passwd".to_string());
+                args.push(path.clone());
+                temp_file_path = Some(path);
+            }
+        }
+    }
+
     let mut cmd = Command::new("vncviewer");
 
     cmd.args(&args)
@@ -367,9 +404,19 @@ pub fn launch_vnc(conn: &Connection) -> Result<Child, String> {
         use std::os::unix::process::CommandExt;
         cmd.process_group(0);
     }
-
-    cmd.spawn()
-       .map_err(|e| format!("Failed to spawn vncviewer process: {}", e))
+    
+    let child = cmd.spawn()
+       .map_err(|e| format!("Failed to spawn vncviewer process: {}", e))?;
+       
+    // Clean up password file after viewer has had time to read it
+    if let Some(path) = temp_file_path {
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_secs(5));
+            let _ = std::fs::remove_file(path);
+        });
+    }
+    
+    Ok(child)
 }
 
 /// Spawns a `remote-viewer` SPICE session detached from parent process group.

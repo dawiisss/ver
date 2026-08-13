@@ -601,7 +601,8 @@ impl MainWindow {
                                 }
                             }
                             Protocol::Vnc => {
-                                if let Ok(child) = launcher::launch_vnc(&conn) {
+                                let pass_opt = if pass.is_empty() { None } else { Some(pass.as_str()) };
+                                if let Ok(child) = launcher::launch_vnc(&conn, pass_opt) {
                                     track_external_session(child, conn.name.clone());
                                 }
                             }
