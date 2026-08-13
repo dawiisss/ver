@@ -155,7 +155,7 @@ pub struct AdvancedSettings {
     pub vnc_shared: bool,
     #[serde(default)]
     pub vnc_fullscreen: bool,
-    #[serde(default)]
+    #[serde(default = "default_true")]
     pub vnc_clipboard: bool, // true by default in builder
     #[serde(default)]
     pub vnc_color_level: VncColorLevel,
@@ -183,6 +183,8 @@ pub struct AdvancedSettings {
     pub rdp_disable_themes: bool,
     pub rdp_disable_animations: bool,
 }
+
+fn default_true() -> bool { true }
 
 impl Default for AdvancedSettings {
     fn default() -> Self {
