@@ -1,9 +1,13 @@
 #!/bin/bash
 set -e
 
-echo "Creating PKGBUILD for Arch Linux..."
+echo "Building release binary..."
+cargo build --release
 
-cat << 'EOF' > PKGBUILD
+BUILD_TMP="$(mktemp -d)"
+ROOT_DIR="$(pwd)"
+
+cat << EOF > "$BUILD_TMP/PKGBUILD"
 pkgname=ver
 pkgver=1.0.0
 pkgrel=1
@@ -12,26 +16,22 @@ arch=('x86_64')
 url="https://github.com/dawiisss/ver"
 license=('GPL3')
 depends=('gtk4' 'libadwaita')
-makedepends=('cargo')
 source=()
 
-build() {
-  cd "$srcdir/.."
-  cargo build --release
-}
-
 package() {
-  cd "$srcdir/.."
-  install -Dm755 target/release/beautiful-goodall "$pkgdir/usr/bin/ver"
-  install -Dm644 data/com.example.ver.desktop "$pkgdir/usr/share/applications/com.example.ver.desktop"
-  install -Dm644 data/com.example.ver.png "$pkgdir/usr/share/pixmaps/com.example.ver.png"
+  install -Dm755 "$ROOT_DIR/target/release/beautiful-goodall" "\$pkgdir/usr/bin/ver"
+  install -Dm644 "$ROOT_DIR/data/com.example.ver.desktop" "\$pkgdir/usr/share/applications/com.example.ver.desktop"
+  install -Dm644 "$ROOT_DIR/data/com.example.ver.png" "\$pkgdir/usr/share/pixmaps/com.example.ver.png"
 }
 EOF
 
-echo "Building pacman package using makepkg..."
-makepkg -f
+echo "Building pacman package using makepkg in isolated directory..."
+(
+  cd "$BUILD_TMP"
+  makepkg -f -d --nodeps
+  cp *.pkg.tar.* "$ROOT_DIR/" 2>/dev/null || true
+)
 
-echo "Cleaning up PKGBUILD..."
-rm PKGBUILD src -rf
+rm -rf "$BUILD_TMP"
+echo "Done! Pacman package generated safely."
 
-echo "Done! Pacman package generated."
