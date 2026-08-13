@@ -413,7 +413,8 @@ mod tests {
         assert_eq!(conn.group, "Default");
         assert_eq!(conn.advanced_settings.color_depth, 0);
         assert_eq!(conn.advanced_settings.clipboard_sharing, false);
-        assert_eq!(conn.advanced_settings.vnc_scaling, VncScaling::OriginalSize);
+        assert_eq!(conn.advanced_settings.vnc_clipboard, true);
+        assert_eq!(conn.advanced_settings.vnc_color_level, VncColorLevel::Full);
     }
 
     #[test]
@@ -473,18 +474,16 @@ mod tests {
     }
 
     #[test]
-    fn test_vnc_scaling_enum_serde_representations() {
-        assert_eq!(serde_json::to_string(&VncScaling::OriginalSize).unwrap(), r#""Original Size""#);
-        assert_eq!(serde_json::to_string(&VncScaling::FitToWindow).unwrap(), r#""Fit to Window""#);
-        assert_eq!(serde_json::to_string(&VncScaling::Stretch).unwrap(), r#""Stretch""#);
+    fn test_vnc_color_level_enum_serde_representations() {
+        assert_eq!(serde_json::to_string(&VncColorLevel::Full).unwrap(), r#""Full Color (Default)""#);
+        assert_eq!(serde_json::to_string(&VncColorLevel::Medium).unwrap(), r#""Medium""#);
+        assert_eq!(serde_json::to_string(&VncColorLevel::Low).unwrap(), r#""Low""#);
+        assert_eq!(serde_json::to_string(&VncColorLevel::VeryLow).unwrap(), r#""Very Low""#);
 
-        let s_orig: VncScaling = serde_json::from_str(r#""Original Size""#).unwrap();
-        let s_fit: VncScaling = serde_json::from_str(r#""Fit to Window""#).unwrap();
-        let s_stretch: VncScaling = serde_json::from_str(r#""Stretch""#).unwrap();
-
-        assert_eq!(s_orig, VncScaling::OriginalSize);
-        assert_eq!(s_fit, VncScaling::FitToWindow);
-        assert_eq!(s_stretch, VncScaling::Stretch);
+        let c_full: VncColorLevel = serde_json::from_str(r#""Full Color (Default)""#).unwrap();
+        let c_med: VncColorLevel = serde_json::from_str(r#""Medium""#).unwrap();
+        assert_eq!(c_full, VncColorLevel::Full);
+        assert_eq!(c_med, VncColorLevel::Medium);
     }
 
     #[test]

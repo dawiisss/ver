@@ -1,6 +1,6 @@
 use libadwaita::prelude::*;
 use beautiful_goodall::{load_config, load_connections, ui::apply_theme, ui::MainWindow};
-use beautiful_goodall::tray::VerTray;
+use beautiful_goodall::tray::{TrayMessage, VerTray};
 use gtk::glib;
 use ksni::blocking::TrayMethods;
 
@@ -18,11 +18,18 @@ fn main() {
 
     let app_clone = app.clone();
     glib::MainContext::default().spawn_local(async move {
-        while let Ok(_) = rx.recv().await {
-            if let Some(window) = app_clone.active_window() {
-                window.present();
-            } else {
-                app_clone.activate();
+        while let Ok(msg) = rx.recv().await {
+            match msg {
+                TrayMessage::Show => {
+                    if let Some(window) = app_clone.active_window() {
+                        window.present();
+                    } else {
+                        app_clone.activate();
+                    }
+                }
+                TrayMessage::Quit => {
+                    app_clone.quit();
+                }
             }
         }
     });

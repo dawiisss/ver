@@ -313,6 +313,10 @@ pub fn build_spice_args(conn: &Connection) -> Vec<String> {
         args.push("--fullscreen".to_string());
     }
 
+    if conn.advanced_settings.spice_scale_to_window {
+        args.push("--auto-resize=always".to_string());
+    }
+
     if conn.advanced_settings.spice_usb_redirect {
         args.push("--spice-usbredir-auto-redirect-filter=-1,-1,-1,-1,0".to_string());
     }
@@ -398,20 +402,30 @@ pub fn launch_vnc(conn: &Connection, password: Option<&str>) -> Result<Child, St
             if let Some(mut stdin) = vncpasswd.stdin.take() {
                 let _ = stdin.write_all(pass.as_bytes());
                 let _ = stdin.write_all(b"\n");
-                let _ = stdin.write_all(pass.as_bytes()); // vncpasswd usually prompts twice, but -f mode reads 8 chars max per line? Actually -f reads one password
+                let _ = stdin.write_all(pass.as_bytes());
                 let _ = stdin.write_all(b"\n");
             }
         }
         
         let output = vncpasswd.wait_with_output().map_err(|e| format!("vncpasswd failed: {}", e))?;
         if output.status.success() {
-            // Write to a temporary file
-            let uuid = uuid::Uuid::new_v4().to_string();
-            let path = format!("/tmp/ver_vnc_{}.pwd", uuid);
-            if std::fs::write(&path, output.stdout).is_ok() {
-                args.push("-passwd".to_string());
-                args.push(path.clone());
-                temp_file_path = Some(path);
+            use std::io::Write;
+            let mut builder = tempfile::Builder::new();
+            builder.prefix("ver_vnc_").suffix(".pwd");
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                builder.permissions(std::fs::Permissions::from_mode(0o600));
+            }
+            if let Ok(mut temp_file) = builder.tempfile() {
+                if temp_file.write_all(&output.stdout).is_ok() {
+                    if let Ok((_, path)) = temp_file.keep() {
+                        let path_str = path.to_string_lossy().to_string();
+                        args.push("-passwd".to_string());
+                        args.push(path_str.clone());
+                        temp_file_path = Some(path_str);
+                    }
+                }
             }
         }
     }
@@ -435,7 +449,7 @@ pub fn launch_vnc(conn: &Connection, password: Option<&str>) -> Result<Child, St
     // Clean up password file after viewer has had time to read it
     if let Some(path) = temp_file_path {
         std::thread::spawn(move || {
-            std::thread::sleep(std::time::Duration::from_secs(5));
+            std::thread::sleep(std::time::Duration::from_secs(3));
             let _ = std::fs::remove_file(path);
         });
     }
@@ -485,7 +499,7 @@ mod tests {
         conn.port = 3389;
         conn.username = "administrator".to_string();
         conn.advanced_settings.clipboard_sharing = true;
-        conn.advanced_settings.color_depth = 32;
+        conn.advanced_settings.rdp_color_depth = RdpColorDepth::TrueColor32;
         conn.advanced_settings.rdp_multimon = true;
         conn.advanced_settings.rdp_fullscreen = true;
         conn.advanced_settings.rdp_audio = true;

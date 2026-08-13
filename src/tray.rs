@@ -1,7 +1,13 @@
 use ksni::{Tray, MenuItem, menu::StandardItem};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TrayMessage {
+    Show,
+    Quit,
+}
+
 pub struct VerTray {
-    pub tx: async_channel::Sender<()>,
+    pub tx: async_channel::Sender<TrayMessage>,
 }
 
 impl Tray for VerTray {
@@ -18,7 +24,7 @@ impl Tray for VerTray {
     }
 
     fn activate(&mut self, _x: i32, _y: i32) {
-        let _ = self.tx.try_send(());
+        let _ = self.tx.try_send(TrayMessage::Show);
     }
 
     fn menu(&self) -> Vec<MenuItem<Self>> {
@@ -26,17 +32,18 @@ impl Tray for VerTray {
             StandardItem {
                 label: "Show".into(),
                 activate: Box::new(|this: &mut Self| {
-                    let _ = this.tx.try_send(());
+                    let _ = this.tx.try_send(TrayMessage::Show);
                 }),
                 ..Default::default()
             }.into(),
             StandardItem {
                 label: "Quit".into(),
-                activate: Box::new(|_| {
-                    std::process::exit(0);
+                activate: Box::new(|this: &mut Self| {
+                    let _ = this.tx.try_send(TrayMessage::Quit);
                 }),
                 ..Default::default()
             }.into(),
         ]
     }
 }
+

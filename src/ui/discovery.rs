@@ -101,8 +101,13 @@ impl DiscoveryDialog {
         window.set_content(Some(&main_box));
 
         let on_add = Arc::new(on_add_callback);
+        let is_scanning = Arc::new(std::sync::atomic::AtomicBool::new(false));
 
-        let start_scan = move |list_box: gtk::ListBox, spinner: gtk::Spinner, status_label: gtk::Label, on_add: Arc<F>| {
+        let start_scan = move |list_box: gtk::ListBox, spinner: gtk::Spinner, status_label: gtk::Label, on_add: Arc<F>, is_scanning: Arc<std::sync::atomic::AtomicBool>| {
+            if is_scanning.compare_exchange(false, true, std::sync::atomic::Ordering::SeqCst, std::sync::atomic::Ordering::SeqCst).is_err() {
+                return;
+            }
+
             // Clear existing list items
             while let Some(child) = list_box.first_child() {
                 list_box.remove(&child);
@@ -114,6 +119,7 @@ impl DiscoveryDialog {
             #[allow(deprecated)]
             let (sender, receiver) = glib::MainContext::channel::<Option<DiscoveredService>>(glib::Priority::default());
 
+            let is_scanning_receiver = is_scanning.clone();
             receiver.attach(None, move |msg| {
                 match msg {
                     Some(service) => {
@@ -163,12 +169,13 @@ impl DiscoveryDialog {
                     None => {
                         spinner.set_spinning(false);
                         status_label.set_text("Scan complete.");
+                        is_scanning_receiver.store(false, std::sync::atomic::Ordering::SeqCst);
                     }
                 }
                 glib::ControlFlow::Continue
             });
 
-            // Spawn scanner thread
+            // Spawn scanner thread pool
             thread::spawn(move || {
                 let targets = vec![
                     ("localhost", "127.0.0.1"),
@@ -181,7 +188,7 @@ impl DiscoveryDialog {
                     (22, "ssh"),
                 ];
 
-                // Probe local targets (synchronously since it's just 1)
+                // Probe local targets
                 for (name, ip_str) in targets {
                     if let Ok(ip) = ip_str.parse::<IpAddr>() {
                         for &(port, proto) in ports {
@@ -202,35 +209,48 @@ impl DiscoveryDialog {
                 // Subnet sweep
                 let mut subnet_prefix = "192.168.1".to_string(); // Fallback
                 if let Ok(my_ip) = local_ip() {
-                    let ip_str = my_ip.to_string();
-                    let parts: Vec<&str> = ip_str.split('.').collect();
-                    if parts.len() == 4 {
-                        subnet_prefix = format!("{}.{}.{}", parts[0], parts[1], parts[2]);
+                    match my_ip {
+                        IpAddr::V4(ipv4) => {
+                            let octets = ipv4.octets();
+                            subnet_prefix = format!("{}.{}.{}", octets[0], octets[1], octets[2]);
+                        }
+                        IpAddr::V6(_) => {}
                     }
                 }
 
-                let mut handles = vec![];
+                let (host_tx, host_rx) = async_channel::unbounded::<u8>();
                 for host_id in 1..=254 {
-                    let ip_str = format!("{}.{}", subnet_prefix, host_id);
+                    let _ = host_tx.send_blocking(host_id);
+                }
+                drop(host_tx);
+
+                let num_workers = 16;
+                let mut handles = vec![];
+                for _ in 0..num_workers {
+                    let host_rx_clone = host_rx.clone();
+                    let prefix = subnet_prefix.clone();
                     let sender_clone = sender.clone();
-                    
+
                     let handle = thread::spawn(move || {
-                        if let Ok(ip) = ip_str.parse::<IpAddr>() {
-                            let ports: &[(u16, &str)] = &[
-                                (5900, "vnc"),
-                                (3389, "rdp"),
-                                (22, "ssh"),
-                            ];
-                            for &(port, proto) in ports {
-                                let addr = SocketAddr::new(ip, port);
-                                if TcpStream::connect_timeout(&addr, Duration::from_millis(150)).is_ok() {
-                                    let service = DiscoveredService {
-                                        name: format!("Host {} ({})", ip_str, proto.to_uppercase()),
-                                        protocol: proto.to_string(),
-                                        host: ip_str.clone(),
-                                        port,
-                                    };
-                                    let _ = sender_clone.send(Some(service));
+                        while let Ok(host_id) = host_rx_clone.recv_blocking() {
+                            let ip_str = format!("{}.{}", prefix, host_id);
+                            if let Ok(ip) = ip_str.parse::<IpAddr>() {
+                                let ports: &[(u16, &str)] = &[
+                                    (5900, "vnc"),
+                                    (3389, "rdp"),
+                                    (22, "ssh"),
+                                ];
+                                for &(port, proto) in ports {
+                                    let addr = SocketAddr::new(ip, port);
+                                    if TcpStream::connect_timeout(&addr, Duration::from_millis(150)).is_ok() {
+                                        let service = DiscoveredService {
+                                            name: format!("Host {} ({})", ip_str, proto.to_uppercase()),
+                                            protocol: proto.to_string(),
+                                            host: ip_str.clone(),
+                                            port,
+                                        };
+                                        let _ = sender_clone.send(Some(service));
+                                    }
                                 }
                             }
                         }
@@ -250,11 +270,12 @@ impl DiscoveryDialog {
         let spinner_clone = spinner.clone();
         let status_label_clone = status_label.clone();
         let on_add_clone = on_add.clone();
+        let is_scanning_clone = is_scanning.clone();
 
-        start_scan(list_box.clone(), spinner.clone(), status_label.clone(), on_add.clone());
+        start_scan(list_box.clone(), spinner.clone(), status_label.clone(), on_add.clone(), is_scanning.clone());
 
         refresh_btn.connect_clicked(move |_| {
-            start_scan(list_box_clone.clone(), spinner_clone.clone(), status_label_clone.clone(), on_add_clone.clone());
+            start_scan(list_box_clone.clone(), spinner_clone.clone(), status_label_clone.clone(), on_add_clone.clone(), is_scanning_clone.clone());
         });
 
         window

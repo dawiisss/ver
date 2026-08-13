@@ -386,7 +386,7 @@ impl ConnectionEditor {
             let entry_port = entry_port.clone();
             move |idx: u32, set_default_port: bool| {
                 match idx {
-                    0 => { // RDP
+                    0 | 4 => { // RDP / XRDP
                         group_rdp.set_visible(true);
                         group_vnc.set_visible(false);
                         group_spice.set_visible(false);

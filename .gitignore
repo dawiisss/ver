@@ -18,3 +18,15 @@ Cargo.lock
 .idea/
 *.swp
 *~
+
+# Packaging artifacts
+*.deb
+*.rpm
+*.pkg.tar.*
+*.AppImage
+appimagetool
+AppDir/
+pkg/
+builddir/
+*.so
+

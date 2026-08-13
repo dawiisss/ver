@@ -191,7 +191,7 @@ pub fn save_config(config: &AppConfig) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::{Connection, Protocol, VncScaling};
+    use crate::models::{Connection, Protocol};
     use tempfile::tempdir;
 
     #[test]
@@ -228,7 +228,7 @@ mod tests {
         conn2.id = "22222222-2222-2222-2222-222222222222".to_string();
         conn2.name = "Server 2".to_string();
         conn2.protocol = Protocol::Vnc;
-        conn2.advanced_settings.vnc_scaling = VncScaling::FitToWindow;
+        conn2.advanced_settings.vnc_shared = true;
 
         let original = vec![conn1, conn2];
 
