@@ -523,8 +523,29 @@ impl MainWindow {
                         btn_disconnect.connect_clicked(move |_| {
                             let mut opt = child_arc_for_btn.lock().unwrap();
                             if let Some(mut c) = opt.take() {
-                                let _ = c.kill();
-                                let _ = c.wait();
+                                std::thread::spawn(move || {
+                                    #[cfg(unix)]
+                                    {
+                                        let pid = c.id();
+                                        let _ = std::process::Command::new("kill")
+                                            .args(["-TERM", &pid.to_string()])
+                                            .status();
+                                    }
+                                    
+                                    let mut exited = false;
+                                    for _ in 0..20 { // wait up to 2 seconds
+                                        if let Ok(Some(_)) = c.try_wait() {
+                                            exited = true;
+                                            break;
+                                        }
+                                        std::thread::sleep(std::time::Duration::from_millis(100));
+                                    }
+                                    
+                                    if !exited {
+                                        let _ = c.kill();
+                                        let _ = c.wait();
+                                    }
+                                });
                             }
                             stack_for_btn.set_visible_child_name("editor");
                         });
