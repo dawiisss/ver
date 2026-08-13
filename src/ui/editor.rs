@@ -2,7 +2,7 @@ use gtk::prelude::*;
 use libadwaita::prelude::*;
 use libadwaita as adw;
 
-use crate::models::{AdvancedSettings, Connection, Protocol, VncColorLevel, RdpColorDepth, RdpNetworkProfile};
+use crate::models::{AdvancedSettings, Connection, Protocol, RdpColorDepth, RdpNetworkProfile};
 
 pub struct ConnectionEditor {
     pub connection: Connection,
