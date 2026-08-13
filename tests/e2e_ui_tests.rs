@@ -5,15 +5,19 @@ use beautiful_goodall::ui::{
 
 #[test]
 fn test_main_window_initialization_and_filtering() {
-    let mut conn1 = Connection::default();
-    conn1.name = "Web Server".to_string();
-    conn1.host = "192.168.1.10".to_string();
-    conn1.group = "Web".to_string();
+    let conn1 = Connection {
+        name: "Web Server".to_string(),
+        host: "192.168.1.10".to_string(),
+        group: "Web".to_string(),
+        ..Default::default()
+    };
 
-    let mut conn2 = Connection::default();
-    conn2.name = "Database Server".to_string();
-    conn2.host = "10.0.0.20".to_string();
-    conn2.group = "Database".to_string();
+    let conn2 = Connection {
+        name: "Database Server".to_string(),
+        host: "10.0.0.20".to_string(),
+        group: "Database".to_string(),
+        ..Default::default()
+    };
 
     let window = MainWindow::new(vec![conn1, conn2], AppConfig::default());
     assert_eq!(window.filtered_connections().len(), 2);
@@ -27,17 +31,23 @@ fn test_main_window_initialization_and_filtering() {
 
 #[test]
 fn test_main_window_grouped_connections() {
-    let mut conn1 = Connection::default();
-    conn1.name = "App 1".to_string();
-    conn1.group = "Production".to_string();
+    let conn1 = Connection {
+        name: "App 1".to_string(),
+        group: "Production".to_string(),
+        ..Default::default()
+    };
 
-    let mut conn2 = Connection::default();
-    conn2.name = "App 2".to_string();
-    conn2.group = "Production".to_string();
+    let conn2 = Connection {
+        name: "App 2".to_string(),
+        group: "Production".to_string(),
+        ..Default::default()
+    };
 
-    let mut conn3 = Connection::default();
-    conn3.name = "Staging 1".to_string();
-    conn3.group = "Staging".to_string();
+    let conn3 = Connection {
+        name: "Staging 1".to_string(),
+        group: "Staging".to_string(),
+        ..Default::default()
+    };
 
     let window = MainWindow::new(vec![conn1, conn2, conn3], AppConfig::default());
     let grouped = window.grouped_connections();

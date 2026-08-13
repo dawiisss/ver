@@ -199,14 +199,16 @@ mod tests {
 
     #[test]
     fn test_python_4space_indent_formatting() {
-        let mut conn = Connection::default();
-        conn.id = "11111111-2222-3333-4444-555555555555".to_string();
-        conn.name = "Test Server".to_string();
-        conn.protocol = Protocol::Vnc;
-        conn.host = "192.168.1.100".to_string();
-        conn.port = 5900;
-        conn.username = "admin".to_string();
-        conn.group = "Servers".to_string();
+        let conn = Connection {
+            id: "11111111-2222-3333-4444-555555555555".to_string(),
+            name: "Test Server".to_string(),
+            protocol: Protocol::Vnc,
+            host: "192.168.1.100".to_string(),
+            port: 5900,
+            username: "admin".to_string(),
+            group: "Servers".to_string(),
+            ..Default::default()
+        };
 
         let connections = vec![conn];
         let json_str = to_json_4spaces(&connections).expect("JSON serialization failed");
@@ -230,16 +232,23 @@ mod tests {
         let dir = tempdir().expect("Failed to create temp dir");
         let file_path = dir.path().join("connections.json");
 
-        let mut conn1 = Connection::default();
-        conn1.id = "11111111-1111-1111-1111-111111111111".to_string();
-        conn1.name = "Server 1".to_string();
-        conn1.protocol = Protocol::Rdp;
+        let conn1 = Connection {
+            id: "11111111-1111-1111-1111-111111111111".to_string(),
+            name: "Server 1".to_string(),
+            protocol: Protocol::Rdp,
+            ..Default::default()
+        };
 
-        let mut conn2 = Connection::default();
-        conn2.id = "22222222-2222-2222-2222-222222222222".to_string();
-        conn2.name = "Server 2".to_string();
-        conn2.protocol = Protocol::Vnc;
-        conn2.advanced_settings.vnc_shared = true;
+        let conn2 = Connection {
+            id: "22222222-2222-2222-2222-222222222222".to_string(),
+            name: "Server 2".to_string(),
+            protocol: Protocol::Vnc,
+            advanced_settings: crate::models::AdvancedSettings {
+                vnc_shared: true,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
 
         let original = vec![conn1, conn2];
 
@@ -258,9 +267,9 @@ mod tests {
         let dir = tempdir().expect("Failed to create temp dir");
         let non_existent_path = dir.path().join("does_not_exist.json");
 
-        let result = load_connections_from_path(&non_existent_path);
-        assert!(result.is_ok());
-        assert!(result.unwrap().is_empty());
+        let loaded = load_connections_from_path(&non_existent_path)
+            .expect("Loading non-existent file should succeed with empty vec");
+        assert!(loaded.is_empty());
     }
 
     #[test]
@@ -320,7 +329,7 @@ mod tests {
         let dir = tempdir().expect("Failed to create temp dir");
         let bin_path = dir.path().join("binary.json");
 
-        fs::write(&bin_path, &[0xFF, 0xFE, 0xFD, 0xFC, 0x00, 0x01]).unwrap();
+        fs::write(&bin_path, [0xFF, 0xFE, 0xFD, 0xFC, 0x00, 0x01]).unwrap();
 
         let loaded = load_connections_from_path(&bin_path)
             .expect("Should recover gracefully from non-UTF8 binary");

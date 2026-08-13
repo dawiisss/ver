@@ -49,9 +49,7 @@ impl ConnectionEditor {
         if self.connection.port == 0 {
             return Err("Port must be a valid number between 1 and 65535".to_string());
         }
-        if let Err(e) = self.connection.validate_mac() {
-            return Err(e);
-        }
+        self.connection.validate_mac()?;
         Ok(())
     }
 
@@ -113,7 +111,7 @@ impl ConnectionEditor {
 
         let entry_port = adw::EntryRow::builder()
             .title("Port")
-            .text(&conn.port.to_string())
+            .text(conn.port.to_string())
             .build();
 
         let entry_username = adw::EntryRow::builder()
@@ -665,9 +663,7 @@ impl ConnectionEditor {
                 },
             };
 
-            if let Err(e) = connection.validate_mac() {
-                return Err(e);
-            }
+            connection.validate_mac()?;
 
             let pass = entry_password.text().to_string();
             Ok((connection, pass))

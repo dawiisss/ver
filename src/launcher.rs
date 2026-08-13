@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 
 /// Linux terminal emulator search order for interactive SSH sessions.
-pub const TERMINAL_CANDIDATES: &[&'static str] = &[
+pub const TERMINAL_CANDIDATES: &[&str] = &[
     "ptyxis",
     "kgx",
     "gnome-terminal",
@@ -519,15 +519,20 @@ mod tests {
 
     #[test]
     fn test_build_rdp_args_standard() {
-        let mut conn = Connection::default();
-        conn.host = "rdp.example.com".to_string();
-        conn.port = 3389;
-        conn.username = "administrator".to_string();
-        conn.advanced_settings.clipboard_sharing = true;
-        conn.advanced_settings.rdp_color_depth = RdpColorDepth::TrueColor32;
-        conn.advanced_settings.rdp_multimon = true;
-        conn.advanced_settings.rdp_fullscreen = true;
-        conn.advanced_settings.rdp_audio = true;
+        let conn = Connection {
+            host: "rdp.example.com".to_string(),
+            port: 3389,
+            username: "administrator".to_string(),
+            advanced_settings: crate::models::AdvancedSettings {
+                clipboard_sharing: true,
+                rdp_color_depth: RdpColorDepth::TrueColor32,
+                rdp_multimon: true,
+                rdp_fullscreen: true,
+                rdp_audio: true,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
 
         let args = build_rdp_args(&conn, Some("MySecretPass"));
 
@@ -545,10 +550,12 @@ mod tests {
 
     #[test]
     fn test_build_rdp_args_default_port_resolution() {
-        let mut conn = Connection::default();
-        conn.protocol = Protocol::Rdp;
-        conn.host = "10.0.0.1".to_string();
-        conn.port = 0; // Default port should resolve to 3389
+        let conn = Connection {
+            protocol: Protocol::Rdp,
+            host: "10.0.0.1".to_string(),
+            port: 0, // Default port should resolve to 3389
+            ..Default::default()
+        };
 
         let args = build_rdp_args(&conn, None);
         assert!(args.contains(&"/v:10.0.0.1:3389".to_string()));
@@ -556,11 +563,13 @@ mod tests {
 
     #[test]
     fn test_build_ssh_args_custom_port() {
-        let mut conn = Connection::default();
-        conn.protocol = Protocol::Ssh;
-        conn.host = "bastion.example.com".to_string();
-        conn.port = 2222;
-        conn.username = "devops".to_string();
+        let conn = Connection {
+            protocol: Protocol::Ssh,
+            host: "bastion.example.com".to_string(),
+            port: 2222,
+            username: "devops".to_string(),
+            ..Default::default()
+        };
 
         let args = build_ssh_args(&conn);
 
@@ -572,11 +581,13 @@ mod tests {
 
     #[test]
     fn test_build_ssh_args_default_port_22() {
-        let mut conn = Connection::default();
-        conn.protocol = Protocol::Ssh;
-        conn.host = "shell.example.com".to_string();
-        conn.port = 22;
-        conn.username = "root".to_string();
+        let conn = Connection {
+            protocol: Protocol::Ssh,
+            host: "shell.example.com".to_string(),
+            port: 22,
+            username: "root".to_string(),
+            ..Default::default()
+        };
 
         let args = build_ssh_args(&conn);
 
@@ -585,11 +596,13 @@ mod tests {
 
     #[test]
     fn test_build_ssh_args_with_identity_file() {
-        let mut conn = Connection::default();
-        conn.protocol = Protocol::Ssh;
-        conn.host = "secure.example.com".to_string();
-        conn.port = 2222;
-        conn.username = "admin".to_string();
+        let conn = Connection {
+            protocol: Protocol::Ssh,
+            host: "secure.example.com".to_string(),
+            port: 2222,
+            username: "admin".to_string(),
+            ..Default::default()
+        };
 
         let args = build_ssh_args_with_identity(&conn, Some("/home/user/.ssh/id_ed25519"));
 

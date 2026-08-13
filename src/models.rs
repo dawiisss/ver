@@ -2,20 +2,15 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 /// Supported remote connection protocols.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum Protocol {
+    #[default]
     Rdp,
     Vnc,
     Ssh,
     Spice,
     Xrdp,
-}
-
-impl Default for Protocol {
-    fn default() -> Self {
-        Protocol::Rdp
-    }
 }
 
 impl Protocol {
@@ -46,9 +41,10 @@ impl std::fmt::Display for Protocol {
 }
 
 /// VNC display scaling modes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum RdpColorDepth {
     #[serde(rename = "Auto (Default)")]
+    #[default]
     Automatic,
     #[serde(rename = "GFX AVC444 (32 bpp)")]
     GfxAvc444,
@@ -72,15 +68,10 @@ pub enum RdpColorDepth {
     Colors256,
 }
 
-impl Default for RdpColorDepth {
-    fn default() -> Self {
-        RdpColorDepth::Automatic
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum VncColorLevel {
     #[serde(rename = "Full Color (Default)")]
+    #[default]
     Full,
     #[serde(rename = "Medium")]
     Medium,
@@ -88,12 +79,6 @@ pub enum VncColorLevel {
     Low,
     #[serde(rename = "Very Low")]
     VeryLow,
-}
-
-impl Default for VncColorLevel {
-    fn default() -> Self {
-        VncColorLevel::Full
-    }
 }
 
 impl VncColorLevel {
@@ -114,34 +99,24 @@ impl std::fmt::Display for VncColorLevel {
 }
 
 /// VNC Encoding options.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum VncEncodingOption {
+    #[default]
     Auto,
     Tight,
     Zrle,
     Raw,
 }
 
-impl Default for VncEncodingOption {
-    fn default() -> Self {
-        VncEncodingOption::Auto
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum RdpNetworkProfile {
+    #[default]
     Auto,
     Lan,
     Wan,
     Broadband,
     Modem,
-}
-
-impl Default for RdpNetworkProfile {
-    fn default() -> Self {
-        RdpNetworkProfile::Auto
-    }
 }
 
 /// Advanced settings per connection.
@@ -421,8 +396,8 @@ mod tests {
         assert_eq!(conn.port, 3389);
         assert_eq!(conn.group, "Default");
         assert_eq!(conn.advanced_settings.color_depth, 0);
-        assert_eq!(conn.advanced_settings.clipboard_sharing, false);
-        assert_eq!(conn.advanced_settings.vnc_clipboard, true);
+        assert!(!conn.advanced_settings.clipboard_sharing);
+        assert!(conn.advanced_settings.vnc_clipboard);
         assert_eq!(conn.advanced_settings.vnc_color_level, VncColorLevel::Full);
     }
 
@@ -550,10 +525,11 @@ mod tests {
 
     #[test]
     fn test_connection_resolve_port() {
-        let mut conn = Connection::default();
-        conn.port = 0;
-
-        conn.protocol = Protocol::Rdp;
+        let mut conn = Connection {
+            port: 0,
+            protocol: Protocol::Rdp,
+            ..Default::default()
+        };
         assert_eq!(conn.resolve_port(), 3389);
 
         conn.protocol = Protocol::Vnc;
@@ -568,8 +544,10 @@ mod tests {
 
     #[test]
     fn test_validate_mac() {
-        let mut conn = Connection::default();
-        conn.mac_address = "".to_string();
+        let mut conn = Connection {
+            mac_address: "".to_string(),
+            ..Default::default()
+        };
         assert_eq!(conn.validate_mac(), Ok(None));
 
         conn.mac_address = "00:11:22:33:44:55".to_string();

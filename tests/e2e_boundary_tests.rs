@@ -62,8 +62,10 @@ fn test_t2_boundary_invalid_mac_address_formats() {
     assert!(build_wol_packet("00:11:22:33:44:55:66:77").is_err());
     assert!(build_wol_packet("ZZ:YY:XX:WW:VV:UU").is_err());
 
-    let mut conn = Connection::default();
-    conn.mac_address = "invalid-mac".to_string();
+    let mut conn = Connection {
+        mac_address: "invalid-mac".to_string(),
+        ..Default::default()
+    };
     assert!(conn.validate_mac().is_err());
 
     conn.mac_address = "".to_string();
@@ -75,9 +77,11 @@ fn test_t2_boundary_invalid_mac_address_formats() {
 
 #[test]
 fn test_t2_boundary_zero_port_resolution_and_sanitization() {
-    let mut conn = Connection::default();
-    conn.port = 0;
-    conn.protocol = Protocol::Vnc;
+    let mut conn = Connection {
+        port: 0,
+        protocol: Protocol::Vnc,
+        ..Default::default()
+    };
 
     assert_eq!(conn.resolve_port(), 5900);
 
@@ -103,8 +107,10 @@ fn test_t2_boundary_unknown_protocol_strings_rejection() {
 
 #[test]
 fn test_t2_boundary_extreme_ports() {
-    let mut conn_max = Connection::default();
-    conn_max.port = 65535;
+    let conn_max = Connection {
+        port: 65535,
+        ..Default::default()
+    };
     let json_max = serde_json::to_string(&conn_max).unwrap();
     let deserialized_max: Connection = serde_json::from_str(&json_max).unwrap();
     assert_eq!(deserialized_max.port, 65535);
@@ -112,10 +118,12 @@ fn test_t2_boundary_extreme_ports() {
 
 #[test]
 fn test_t2_boundary_unicode_connection_fields() {
-    let mut conn = Connection::default();
-    conn.name = "服务器 🚀 Remote (Köln)".to_string();
-    conn.group = "Testing 測試 Group".to_string();
-    conn.username = "usr_ñandú_123".to_string();
+    let conn = Connection {
+        name: "服务器 🚀 Remote (Köln)".to_string(),
+        group: "Testing 測試 Group".to_string(),
+        username: "usr_ñandú_123".to_string(),
+        ..Default::default()
+    };
 
     let json = serde_json::to_string(&conn).expect("Serialization failed");
     let deserialized: Connection = serde_json::from_str(&json).expect("Deserialization failed");

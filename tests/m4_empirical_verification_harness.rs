@@ -112,11 +112,13 @@ fn test_wol_send_to_loopback_socket_binding_and_payload() {
 
 #[test]
 fn test_terminal_emulator_path_resolution_and_stdio_flags() {
-    let mut conn = Connection::default();
-    conn.protocol = Protocol::Ssh;
-    conn.host = "test.server.org".to_string();
-    conn.port = 22;
-    conn.username = "alice".to_string();
+    let conn = Connection {
+        protocol: Protocol::Ssh,
+        host: "test.server.org".to_string(),
+        port: 22,
+        username: "alice".to_string(),
+        ..Default::default()
+    };
 
     let default_ssh_args = build_ssh_args(&conn);
     assert_eq!(default_ssh_args, vec!["ssh", "alice@test.server.org"]);
@@ -127,9 +129,11 @@ fn test_terminal_emulator_path_resolution_and_stdio_flags() {
         vec!["ssh", "-i", "/tmp/id_rsa", "alice@test.server.org"]
     );
 
-    let mut rdp_conn = Connection::default();
-    rdp_conn.protocol = Protocol::Rdp;
-    rdp_conn.host = "192.168.1.100".to_string();
+    let rdp_conn = Connection {
+        protocol: Protocol::Rdp,
+        host: "192.168.1.100".to_string(),
+        ..Default::default()
+    };
     let rdp_args = build_rdp_args(&rdp_conn, Some("secret"));
     assert!(rdp_args.contains(&"/v:192.168.1.100:3389".to_string()));
     assert!(rdp_args.contains(&"/p:secret".to_string()));

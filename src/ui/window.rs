@@ -337,7 +337,7 @@ impl MainWindow {
             let list_box = list_box.clone();
             let window_title = window_title.clone();
             move || {
-                let default_protocol = state.borrow().config.default_protocol.clone();
+                let default_protocol = state.borrow().config.default_protocol;
                 let new_conn = Connection::new_with_protocol(default_protocol);
                 state.borrow_mut().connections.push(new_conn.clone());
                 let _ = storage::save_connections(&state.borrow().connections);
@@ -474,10 +474,8 @@ impl MainWindow {
                     std::thread::spawn(move || {
                         use std::io::{BufRead, BufReader};
                         let reader = BufReader::new(stdout);
-                        for line in reader.lines() {
-                            if let Ok(l) = line {
-                                let _ = tx_out.send_blocking(ExternalSessionEvent::Log(l));
-                            }
+                        for l in reader.lines().map_while(Result::ok) {
+                            let _ = tx_out.send_blocking(ExternalSessionEvent::Log(l));
                         }
                     });
                 }
@@ -487,10 +485,8 @@ impl MainWindow {
                     std::thread::spawn(move || {
                         use std::io::{BufRead, BufReader};
                         let reader = BufReader::new(stderr);
-                        for line in reader.lines() {
-                            if let Ok(l) = line {
-                                let _ = tx_err.send_blocking(ExternalSessionEvent::Log(l));
-                            }
+                        for l in reader.lines().map_while(Result::ok) {
+                            let _ = tx_err.send_blocking(ExternalSessionEvent::Log(l));
                         }
                     });
                 }

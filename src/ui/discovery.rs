@@ -19,6 +19,7 @@ pub struct DiscoveredService {
     pub port: u16,
 }
 
+#[derive(Default)]
 pub struct DiscoveryDialog {
     pub discovered_services: Vec<DiscoveredService>,
 }
