@@ -149,7 +149,46 @@ impl ConnectionEditor {
         group_network.add(&entry_mac);
         page.add(&group_network);
 
-        // 3. Advanced RDP Settings
+        // 3. RDP Security & Certificates
+        let group_rdp_security = adw::PreferencesGroup::builder()
+            .title("RDP Security &amp; Certificates")
+            .build();
+
+        let cert_model = gtk::StringList::new(&[
+            "Ignore (Accept all certificates)",
+            "Trust on First Use (TOFU)",
+            "Strict (Reject untrusted)",
+            "Prompt / Ask (Default)",
+        ]);
+        let cert_idx = match conn.advanced_settings.rdp_cert_handling {
+            RdpCertHandling::Ignore => 0,
+            RdpCertHandling::Tofu => 1,
+            RdpCertHandling::Deny => 2,
+            RdpCertHandling::Ask => 3,
+        };
+        let combo_rdp_cert = adw::ComboRow::builder()
+            .title("Certificate Validation")
+            .subtitle("Configure TLS certificate verification policy")
+            .model(&cert_model)
+            .selected(cert_idx)
+            .build();
+
+        let entry_rdp_domain = adw::EntryRow::builder()
+            .title("Domain")
+            .text(&conn.advanced_settings.rdp_domain)
+            .build();
+
+        let entry_rdp_gateway = adw::EntryRow::builder()
+            .title("RD Gateway")
+            .text(&conn.advanced_settings.rdp_gateway)
+            .build();
+
+        group_rdp_security.add(&combo_rdp_cert);
+        group_rdp_security.add(&entry_rdp_domain);
+        group_rdp_security.add(&entry_rdp_gateway);
+        page.add(&group_rdp_security);
+
+        // 4. Advanced RDP Settings
         let group_rdp = adw::PreferencesGroup::builder()
             .title("Advanced RDP Settings")
             .build();
@@ -167,16 +206,6 @@ impl ConnectionEditor {
         let switch_rdp_audio = adw::SwitchRow::builder()
             .title("Audio Redirection")
             .active(conn.advanced_settings.rdp_audio)
-            .build();
-
-        let entry_rdp_domain = adw::EntryRow::builder()
-            .title("Domain")
-            .text(&conn.advanced_settings.rdp_domain)
-            .build();
-
-        let entry_rdp_gateway = adw::EntryRow::builder()
-            .title("RD Gateway")
-            .text(&conn.advanced_settings.rdp_gateway)
             .build();
 
         let entry_rdp_shared_folder = adw::EntryRow::builder()
@@ -206,25 +235,6 @@ impl ConnectionEditor {
             .title("Network Profile")
             .model(&network_model)
             .selected(network_idx)
-            .build();
-
-        let cert_model = gtk::StringList::new(&[
-            "Ignore (Accept all certificates)",
-            "Trust on First Use (TOFU)",
-            "Strict (Reject untrusted)",
-            "Prompt / Ask (Default)",
-        ]);
-        let cert_idx = match conn.advanced_settings.rdp_cert_handling {
-            RdpCertHandling::Ignore => 0,
-            RdpCertHandling::Tofu => 1,
-            RdpCertHandling::Deny => 2,
-            RdpCertHandling::Ask => 3,
-        };
-        let combo_rdp_cert = adw::ComboRow::builder()
-            .title("Certificate Validation")
-            .subtitle("Configure TLS certificate verification policy")
-            .model(&cert_model)
-            .selected(cert_idx)
             .build();
 
         let switch_rdp_disable_wallpaper = adw::SwitchRow::builder()
@@ -281,11 +291,8 @@ impl ConnectionEditor {
         group_rdp.add(&switch_rdp_audio);
         group_rdp.add(&switch_rdp_microphone);
         group_rdp.add(&switch_rdp_usb_redirect);
-        group_rdp.add(&entry_rdp_domain);
-        group_rdp.add(&entry_rdp_gateway);
         group_rdp.add(&entry_rdp_shared_folder);
         group_rdp.add(&combo_rdp_network);
-        group_rdp.add(&combo_rdp_cert);
         group_rdp.add(&switch_rdp_dynamic_res);
         group_rdp.add(&entry_rdp_custom_res);
         group_rdp.add(&switch_rdp_glyph_cache);
@@ -424,6 +431,7 @@ impl ConnectionEditor {
         // Toggle Visibility based on Protocol
         let update_protocol_visibility = {
             let group_rdp = group_rdp.clone();
+            let group_rdp_security = group_rdp_security.clone();
             let group_vnc = group_vnc.clone();
             let group_spice = group_spice.clone();
             let entry_port = entry_port.clone();
@@ -432,6 +440,7 @@ impl ConnectionEditor {
                     0 | 4 => {
                         // RDP / XRDP
                         group_rdp.set_visible(true);
+                        group_rdp_security.set_visible(true);
                         group_vnc.set_visible(false);
                         group_spice.set_visible(false);
                         if set_default_port {
@@ -441,6 +450,7 @@ impl ConnectionEditor {
                     1 => {
                         // VNC
                         group_rdp.set_visible(false);
+                        group_rdp_security.set_visible(false);
                         group_vnc.set_visible(true);
                         group_spice.set_visible(false);
                         if set_default_port {
@@ -450,6 +460,7 @@ impl ConnectionEditor {
                     3 => {
                         // SPICE
                         group_rdp.set_visible(false);
+                        group_rdp_security.set_visible(false);
                         group_vnc.set_visible(false);
                         group_spice.set_visible(true);
                         if set_default_port {
@@ -459,6 +470,7 @@ impl ConnectionEditor {
                     _ => {
                         // SSH
                         group_rdp.set_visible(false);
+                        group_rdp_security.set_visible(false);
                         group_vnc.set_visible(false);
                         group_spice.set_visible(false);
                         if set_default_port {
