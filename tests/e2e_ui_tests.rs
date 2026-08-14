@@ -107,3 +107,37 @@ fn test_discovery_dialog_add_services() {
     assert_eq!(dialog.discovered_services[0].protocol, "vnc");
     assert_eq!(dialog.discovered_services[0].port, 5900);
 }
+
+#[test]
+fn test_active_session_tracking() {
+    use std::collections::HashMap;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+
+    let is_running_1 = Arc::new(AtomicBool::new(true));
+    let is_running_2 = Arc::new(AtomicBool::new(false));
+
+    let mut sessions: HashMap<String, Arc<AtomicBool>> = HashMap::new();
+    sessions.insert("conn-1".to_string(), is_running_1.clone());
+    sessions.insert("conn-2".to_string(), is_running_2.clone());
+
+    assert!(sessions
+        .get("conn-1")
+        .map(|s| s.load(Ordering::SeqCst))
+        .unwrap_or(false));
+    assert!(!sessions
+        .get("conn-2")
+        .map(|s| s.load(Ordering::SeqCst))
+        .unwrap_or(false));
+    assert!(!sessions
+        .get("conn-3")
+        .map(|s| s.load(Ordering::SeqCst))
+        .unwrap_or(false));
+
+    // Simulate session termination
+    is_running_1.store(false, Ordering::SeqCst);
+    assert!(!sessions
+        .get("conn-1")
+        .map(|s| s.load(Ordering::SeqCst))
+        .unwrap_or(false));
+}

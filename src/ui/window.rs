@@ -4,8 +4,10 @@ use gtk::prelude::*;
 use libadwaita as adw;
 use libadwaita::prelude::*;
 use std::cell::RefCell;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::rc::Rc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 
 use crate::launcher;
 use crate::models::{AppConfig, Connection, Protocol};
@@ -16,11 +18,21 @@ use crate::ui::discovery::DiscoveryDialog;
 use crate::ui::editor::ConnectionEditor;
 use crate::ui::preferences::{apply_theme, PreferencesWindow};
 
+#[derive(Clone)]
+pub struct ActiveSession {
+    pub conn_id: String,
+    pub conn_name: String,
+    pub child: Arc<Mutex<Option<std::process::Child>>>,
+    pub log_buffer: gtk::TextBuffer,
+    pub is_running: Arc<AtomicBool>,
+}
+
 pub struct AppWindowState {
     pub connections: Vec<Connection>,
     pub selected_id: Option<String>,
     pub search_query: String,
     pub config: AppConfig,
+    pub active_sessions: HashMap<String, ActiveSession>,
 }
 
 pub struct MainWindow {
@@ -91,6 +103,7 @@ impl MainWindow {
             selected_id: None,
             search_query: String::new(),
             config,
+            active_sessions: HashMap::new(),
         }));
 
         let window_title = adw::WindowTitle::builder()
@@ -309,6 +322,16 @@ impl MainWindow {
 
             let icon = gtk::Image::from_icon_name(icon_name);
             action_row.add_prefix(&icon);
+
+            let active_badge = gtk::Label::builder()
+                .label("Active")
+                .css_classes(vec!["success", "pill", "caption"])
+                .valign(gtk::Align::Center)
+                .visible(false)
+                .build();
+            active_badge.set_widget_name("active_badge");
+            action_row.add_suffix(&active_badge);
+
             row.set_child(Some(&action_row));
             row
         };
@@ -416,58 +439,160 @@ impl MainWindow {
             Exit(bool), // true if success (0), false if error
         }
 
-        let external_session_container_clone = external_session_container.clone();
-        let content_stack_clone = content_stack.clone();
+        let show_external_session = {
+            let container = external_session_container.clone();
+            let stack = content_stack.clone();
+            let state_for_show = state.clone();
+            let list_box_for_show = list_box.clone();
+            Rc::new(move |conn_id: &str| {
+                let session_opt = state_for_show
+                    .borrow()
+                    .active_sessions
+                    .get(conn_id)
+                    .cloned();
+                if let Some(session) = session_opt {
+                    while let Some(c) = container.first_child() {
+                        container.remove(&c);
+                    }
 
-        let track_external_session =
-            Rc::new(move |mut child: std::process::Child, name: String| {
-                let container = external_session_container_clone.clone();
-                let stack = content_stack_clone.clone();
+                    let title = gtk::Label::builder()
+                        .label(format!("External Session Active: {}", session.conn_name))
+                        .css_classes(vec!["title-2"])
+                        .margin_top(48)
+                        .margin_bottom(12)
+                        .build();
 
-                while let Some(c) = container.first_child() {
-                    container.remove(&c);
+                    let button_box = gtk::Box::builder()
+                        .orientation(gtk::Orientation::Horizontal)
+                        .spacing(12)
+                        .halign(gtk::Align::Center)
+                        .margin_bottom(24)
+                        .build();
+
+                    let btn_disconnect = gtk::Button::builder()
+                        .label("Disconnect")
+                        .css_classes(vec!["destructive-action", "pill"])
+                        .build();
+
+                    let btn_view_settings = gtk::Button::builder()
+                        .label("View Settings")
+                        .css_classes(vec!["flat", "pill"])
+                        .build();
+
+                    button_box.append(&btn_disconnect);
+                    button_box.append(&btn_view_settings);
+
+                    let log_view = gtk::TextView::builder()
+                        .buffer(&session.log_buffer)
+                        .editable(false)
+                        .cursor_visible(false)
+                        .monospace(true)
+                        .css_classes(vec!["card", "view"])
+                        .left_margin(12)
+                        .right_margin(12)
+                        .top_margin(12)
+                        .bottom_margin(12)
+                        .wrap_mode(gtk::WrapMode::WordChar)
+                        .build();
+
+                    let scroll = gtk::ScrolledWindow::builder()
+                        .child(&log_view)
+                        .vexpand(true)
+                        .hexpand(true)
+                        .min_content_height(300)
+                        .margin_start(24)
+                        .margin_end(24)
+                        .margin_bottom(24)
+                        .build();
+
+                    let child_arc = session.child.clone();
+                    let is_running = session.is_running.clone();
+                    let stack_for_btn = stack.clone();
+                    let state_for_btn = state_for_show.clone();
+                    let list_box_for_btn = list_box_for_show.clone();
+                    let id_for_btn = conn_id.to_string();
+
+                    btn_disconnect.connect_clicked(move |_| {
+                        is_running.store(false, Ordering::SeqCst);
+                        let mut opt = child_arc.lock().unwrap();
+                        if let Some(mut c) = opt.take() {
+                            std::thread::spawn(move || {
+                                #[cfg(unix)]
+                                {
+                                    let pid = c.id();
+                                    unsafe {
+                                        libc::kill(pid as i32, libc::SIGTERM);
+                                    }
+                                }
+
+                                let mut exited = false;
+                                for _ in 0..20 {
+                                    if let Ok(Some(_)) = c.try_wait() {
+                                        exited = true;
+                                        break;
+                                    }
+                                    std::thread::sleep(std::time::Duration::from_millis(100));
+                                }
+
+                                if !exited {
+                                    let _ = c.kill();
+                                    let _ = c.wait();
+                                }
+                            });
+                        }
+                        state_for_btn
+                            .borrow_mut()
+                            .active_sessions
+                            .remove(&id_for_btn);
+                        set_row_active_badge(&list_box_for_btn, &id_for_btn, false);
+                        stack_for_btn.set_visible_child_name("editor");
+                    });
+
+                    let stack_for_settings = stack.clone();
+                    btn_view_settings.connect_clicked(move |_| {
+                        stack_for_settings.set_visible_child_name("editor");
+                    });
+
+                    container.append(&title);
+                    container.append(&button_box);
+                    container.append(&scroll);
+                    stack.set_visible_child_name("external_session");
                 }
+            })
+        };
 
-                let title = gtk::Label::builder()
-                    .label(format!("External Session Active: {}", name))
-                    .css_classes(vec!["title-2"])
-                    .margin_top(48)
-                    .margin_bottom(12)
-                    .build();
-
-                let btn_disconnect = gtk::Button::builder()
-                    .label("Disconnect")
-                    .css_classes(vec!["destructive-action", "pill"])
-                    .halign(gtk::Align::Center)
-                    .margin_bottom(24)
-                    .build();
-
-                let log_view = gtk::TextView::builder()
-                    .editable(false)
-                    .cursor_visible(false)
-                    .monospace(true)
-                    .css_classes(vec!["card", "view"])
-                    .left_margin(12)
-                    .right_margin(12)
-                    .top_margin(12)
-                    .bottom_margin(12)
-                    .wrap_mode(gtk::WrapMode::WordChar)
-                    .build();
-
-                let scroll = gtk::ScrolledWindow::builder()
-                    .child(&log_view)
-                    .vexpand(true)
-                    .hexpand(true)
-                    .min_content_height(300)
-                    .margin_start(24)
-                    .margin_end(24)
-                    .margin_bottom(24)
-                    .build();
-
-                let (tx, rx) = async_channel::unbounded::<ExternalSessionEvent>();
+        let track_external_session = {
+            let state_for_track = state.clone();
+            let list_box_for_track = list_box.clone();
+            let show_session_for_track = show_external_session.clone();
+            let stack_for_track = content_stack.clone();
+            Rc::new(move |mut child: std::process::Child, conn: Connection| {
+                let conn_id = conn.id.clone();
+                let conn_name = conn.name.clone();
+                let log_buffer = gtk::TextBuffer::new(None);
+                let is_running = Arc::new(AtomicBool::new(true));
 
                 let stdout_pipe = child.stdout.take();
                 let stderr_pipe = child.stderr.take();
+
+                let child_arc = Arc::new(Mutex::new(Some(child)));
+
+                let active_session = ActiveSession {
+                    conn_id: conn_id.clone(),
+                    conn_name: conn_name.clone(),
+                    child: child_arc.clone(),
+                    log_buffer: log_buffer.clone(),
+                    is_running: is_running.clone(),
+                };
+
+                state_for_track
+                    .borrow_mut()
+                    .active_sessions
+                    .insert(conn_id.clone(), active_session);
+
+                set_row_active_badge(&list_box_for_track, &conn_id, true);
+
+                let (tx, rx) = async_channel::unbounded::<ExternalSessionEvent>();
 
                 let tx_out = tx.clone();
                 if let Some(stdout) = stdout_pipe {
@@ -491,66 +616,31 @@ impl MainWindow {
                     });
                 }
 
-                let child_arc = std::sync::Arc::new(std::sync::Mutex::new(Some(child)));
-                let child_arc_for_btn = child_arc.clone();
-                let stack_for_btn = stack.clone();
-
-                btn_disconnect.connect_clicked(move |_| {
-                    let mut opt = child_arc_for_btn.lock().unwrap();
-                    if let Some(mut c) = opt.take() {
-                        std::thread::spawn(move || {
-                            #[cfg(unix)]
-                            {
-                                let pid = c.id();
-                                unsafe {
-                                    libc::kill(pid as i32, libc::SIGTERM);
-                                }
-                            }
-
-                            let mut exited = false;
-                            for _ in 0..20 {
-                                // wait up to 2 seconds
-                                if let Ok(Some(_)) = c.try_wait() {
-                                    exited = true;
-                                    break;
-                                }
-                                std::thread::sleep(std::time::Duration::from_millis(100));
-                            }
-
-                            if !exited {
-                                let _ = c.kill();
-                                let _ = c.wait();
-                            }
-                        });
-                    }
-                    stack_for_btn.set_visible_child_name("editor");
-                });
-
-                container.append(&title);
-                container.append(&btn_disconnect);
-                container.append(&scroll);
-                stack.set_visible_child_name("external_session");
-
-                let child_arc_for_thread = child_arc.clone();
+                let child_arc_for_wait = child_arc.clone();
+                let is_running_for_wait = is_running.clone();
                 let tx_exit = tx.clone();
 
                 std::thread::spawn(move || loop {
                     std::thread::sleep(std::time::Duration::from_millis(500));
-                    let mut opt = child_arc_for_thread.lock().unwrap();
+                    let mut opt = child_arc_for_wait.lock().unwrap();
                     if let Some(ref mut c) = *opt {
                         if let Ok(Some(status)) = c.try_wait() {
                             let success = status.success();
+                            is_running_for_wait.store(false, Ordering::SeqCst);
                             let _ = tx_exit.send_blocking(ExternalSessionEvent::Exit(success));
                             break;
                         }
                     } else {
+                        is_running_for_wait.store(false, Ordering::SeqCst);
                         break;
                     }
                 });
 
-                let buffer = log_view.buffer();
-                let title_for_exit = title.clone();
-                let btn_for_exit = btn_disconnect.clone();
+                let buffer = log_buffer.clone();
+                let list_box_for_exit = list_box_for_track.clone();
+                let state_for_exit = state_for_track.clone();
+                let stack_for_exit = stack_for_track.clone();
+                let conn_id_for_exit = conn_id.clone();
 
                 gtk::glib::MainContext::default().spawn_local(async move {
                     while let Ok(event) = rx.recv().await {
@@ -558,22 +648,32 @@ impl MainWindow {
                             ExternalSessionEvent::Log(msg) => {
                                 let mut iter = buffer.end_iter();
                                 buffer.insert(&mut iter, &format!("{}\n", msg));
-                                let mark = buffer.create_mark(None, &buffer.end_iter(), false);
-                                log_view.scroll_to_mark(&mark, 0.0, true, 0.0, 1.0);
                             }
                             ExternalSessionEvent::Exit(success) => {
-                                if success {
-                                    stack.set_visible_child_name("editor");
-                                } else {
-                                    title_for_exit.set_label("Session Failed");
-                                    title_for_exit.add_css_class("error");
-                                    btn_for_exit.set_label("Close");
+                                state_for_exit
+                                    .borrow_mut()
+                                    .active_sessions
+                                    .remove(&conn_id_for_exit);
+                                set_row_active_badge(&list_box_for_exit, &conn_id_for_exit, false);
+
+                                let is_currently_selected = state_for_exit
+                                    .borrow()
+                                    .selected_id
+                                    .as_ref()
+                                    .map(|id| id == &conn_id_for_exit)
+                                    .unwrap_or(false);
+
+                                if is_currently_selected && success {
+                                    stack_for_exit.set_visible_child_name("editor");
                                 }
                             }
                         }
                     }
                 });
-            });
+
+                show_session_for_track(&conn_id);
+            })
+        };
 
         let state_for_launch = state.clone();
         let toast_overlay_for_launch = toast_overlay.clone();
@@ -612,7 +712,7 @@ impl MainWindow {
 
             match launch_result {
                 Ok(child) => {
-                    track_session_for_launch(child, conn.name.clone());
+                    track_session_for_launch(child, conn);
                 }
                 Err(err) => {
                     toast_overlay_for_launch
@@ -627,6 +727,7 @@ impl MainWindow {
         let editor_container_for_select = editor_container.clone();
         let list_box_for_select = list_box.clone();
         let launch_session_for_select = launch_session.clone();
+        let show_session_for_select = show_external_session.clone();
 
         list_box.connect_row_selected(move |_, row_opt| {
             while let Some(child) = editor_container_for_select.first_child() {
@@ -636,6 +737,13 @@ impl MainWindow {
             if let Some(row) = row_opt {
                 let conn_id = row.widget_name().to_string();
                 state_for_select.borrow_mut().selected_id = Some(conn_id.clone());
+
+                let is_session_active = state_for_select
+                    .borrow()
+                    .active_sessions
+                    .get(&conn_id)
+                    .map(|s| s.is_running.load(Ordering::SeqCst))
+                    .unwrap_or(false);
 
                 let conn_opt = state_for_select
                     .borrow()
@@ -751,8 +859,27 @@ impl MainWindow {
                         on_wake,
                     );
 
+                    if is_session_active {
+                        let banner = adw::Banner::builder()
+                            .title("An active session is currently running for this connection")
+                            .button_label("View Session")
+                            .revealed(true)
+                            .build();
+                        let show_session_for_banner = show_session_for_select.clone();
+                        let id_for_banner = conn_id.clone();
+                        banner.connect_button_clicked(move |_| {
+                            show_session_for_banner(&id_for_banner);
+                        });
+                        editor_container_for_select.append(&banner);
+                    }
+
                     editor_container_for_select.append(&editor_widget);
-                    content_stack_for_select.set_visible_child_name("editor");
+
+                    if is_session_active {
+                        show_session_for_select(&conn_id);
+                    } else {
+                        content_stack_for_select.set_visible_child_name("editor");
+                    }
                 }
             } else {
                 state_for_select.borrow_mut().selected_id = None;
@@ -889,4 +1016,38 @@ fn setup_filtering(
         list_box_clone.invalidate_filter();
         list_box_clone.invalidate_headers();
     });
+}
+
+fn find_and_set_badge(widget: &gtk::Widget, is_active: bool) -> bool {
+    if widget.widget_name() == "active_badge" {
+        widget.set_visible(is_active);
+        return true;
+    }
+    let mut child = widget.first_child();
+    while let Some(c) = child {
+        if find_and_set_badge(&c, is_active) {
+            return true;
+        }
+        child = c.next_sibling();
+    }
+    false
+}
+
+fn set_row_active_badge(list_box: &gtk::ListBox, conn_id: &str, is_active: bool) {
+    let mut child_opt = list_box.first_child();
+    while let Some(child) = child_opt {
+        if let Ok(row) = child.clone().downcast::<gtk::ListBoxRow>() {
+            if row.widget_name() == conn_id {
+                let mut next_w = row.first_child();
+                while let Some(w) = next_w {
+                    if find_and_set_badge(&w, is_active) {
+                        return;
+                    }
+                    next_w = w.next_sibling();
+                }
+                break;
+            }
+        }
+        child_opt = child.next_sibling();
+    }
 }
