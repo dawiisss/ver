@@ -1,8 +1,8 @@
-use beautiful_goodall::tray::{TrayMessage, VerTray};
-use beautiful_goodall::{load_config, load_connections, ui::apply_theme, ui::MainWindow};
 use gtk::glib;
 use ksni::blocking::TrayMethods;
 use libadwaita::prelude::*;
+use ver::tray::{TrayMessage, VerTray};
+use ver::{load_config, load_connections, ui::apply_theme, ui::MainWindow};
 
 fn main() {
     libadwaita::init().expect("Failed to initialize Libadwaita");

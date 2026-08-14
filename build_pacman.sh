@@ -2,7 +2,7 @@
 set -e
 
 VERSION="${1:-$(grep '^version' Cargo.toml | head -1 | cut -d '"' -f 2)}"
-VERSION="${VERSION:-1.0.0}"
+VERSION="${VERSION:-1.1.0}"
 VERSION="${VERSION#v}"
 APP_NAME="ver"
 PKG_DIR="$(mktemp -d)"
@@ -17,7 +17,7 @@ mkdir -p "$PKG_DIR/usr/bin"
 mkdir -p "$PKG_DIR/usr/share/applications"
 mkdir -p "$PKG_DIR/usr/share/pixmaps"
 
-cp target/release/beautiful-goodall "$PKG_DIR/usr/bin/ver"
+cp target/release/ver "$PKG_DIR/usr/bin/ver"
 cp data/com.example.ver.desktop "$PKG_DIR/usr/share/applications/"
 cp data/com.example.ver.png "$PKG_DIR/usr/share/pixmaps/"
 

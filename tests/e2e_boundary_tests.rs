@@ -1,9 +1,9 @@
-use beautiful_goodall::models::{AdvancedSettings, Connection, Protocol};
-use beautiful_goodall::network::build_wol_packet;
-use beautiful_goodall::secrets;
-use beautiful_goodall::storage::load_connections_from_path;
 use std::fs;
 use tempfile::tempdir;
+use ver::models::{AdvancedSettings, Connection, Protocol};
+use ver::network::build_wol_packet;
+use ver::secrets;
+use ver::storage::load_connections_from_path;
 
 // ============================================================================
 // Tier 2: Boundary & Corner Cases

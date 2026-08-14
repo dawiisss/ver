@@ -1,4 +1,4 @@
-use beautiful_goodall::models::AdvancedSettings;
+use ver::models::AdvancedSettings;
 #[test]
 fn test_serde() {
     let json = r#"{

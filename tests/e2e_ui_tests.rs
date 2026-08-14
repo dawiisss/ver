@@ -1,5 +1,5 @@
-use beautiful_goodall::models::{AppConfig, Connection};
-use beautiful_goodall::ui::{
+use ver::models::{AppConfig, Connection};
+use ver::ui::{
     ConnectionEditor, DiscoveredService, DiscoveryDialog, MainWindow, PreferencesWindow,
 };
 

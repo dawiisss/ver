@@ -1,5 +1,5 @@
-use beautiful_goodall::launcher::build_vnc_args;
-use beautiful_goodall::models::{Connection, Protocol, VncColorLevel, VncEncodingOption};
+use ver::launcher::build_vnc_args;
+use ver::models::{Connection, Protocol, VncColorLevel, VncEncodingOption};
 
 #[test]
 fn test_print_args() {

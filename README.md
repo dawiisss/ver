@@ -68,5 +68,5 @@ Or build an optimized binary with Cargo:
 ```bash
 cargo build --release
 ```
-The resulting executable will be in `target/release/beautiful-goodall`.
+The resulting executable will be in `target/release/ver`.
 

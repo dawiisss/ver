@@ -2,7 +2,7 @@
 set -e
 
 VERSION="${1:-$(grep '^version' Cargo.toml | head -1 | cut -d '"' -f 2)}"
-VERSION="${VERSION:-1.0.0}"
+VERSION="${VERSION:-1.1.0}"
 VERSION="${VERSION#v}"
 APP_NAME="ver"
 APPIMAGE_NAME="${APP_NAME}-${VERSION}-x86_64.AppImage"
@@ -16,7 +16,7 @@ mkdir -p AppDir/usr/bin
 mkdir -p AppDir/usr/share/applications
 mkdir -p AppDir/usr/share/pixmaps
 
-cp target/release/beautiful-goodall AppDir/usr/bin/ver
+cp target/release/ver AppDir/usr/bin/ver
 cp data/com.example.ver.desktop AppDir/usr/share/applications/
 cp data/com.example.ver.png AppDir/usr/share/pixmaps/
 

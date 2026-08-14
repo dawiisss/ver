@@ -48,7 +48,7 @@ jobs:
       - name: Build Standalone Tarball (.tar.gz)
         run: |
           mkdir -p staging
-          cp target/release/beautiful-goodall staging/ver
+          cp target/release/ver staging/ver
           cp data/com.example.ver.desktop staging/
           cp data/com.example.ver.png staging/
           tar -czvf ver-linux-x86_64-${{ github.ref_name }}.tar.gz -C staging .

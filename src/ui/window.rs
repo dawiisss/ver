@@ -261,8 +261,8 @@ impl MainWindow {
         about_action.connect_activate(move |_, _| {
             let about = adw::AboutWindow::builder()
                 .application_name("VER - Very Easy Remote")
-                .developer_name("VER Team")
-                .version("1.0.0")
+                .developer_name("dawiisss")
+                .version("1.1.0")
                 .comments("GTK4 / Libadwaita Remote Connection Manager in Rust")
                 .license_type(gtk::License::Gpl30)
                 .transient_for(&window_clone)

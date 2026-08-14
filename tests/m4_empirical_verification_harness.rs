@@ -1,14 +1,14 @@
-use beautiful_goodall::launcher::{
+use std::net::UdpSocket;
+use std::time::Duration;
+use ver::launcher::{
     build_rdp_args, build_ssh_args, build_ssh_args_with_identity, build_terminal_command,
     detect_terminal_emulator, find_binary_in_path, TERMINAL_CANDIDATES,
 };
-use beautiful_goodall::models::{Connection, Protocol};
-use beautiful_goodall::network::{
+use ver::models::{Connection, Protocol};
+use ver::network::{
     build_wol_packet, build_wol_packet_bytes, parse_mac_address, send_wol_to,
     DEFAULT_BROADCAST_ADDR, DEFAULT_WOL_PORT,
 };
-use std::net::UdpSocket;
-use std::time::Duration;
 
 #[test]
 fn test_wol_packet_binary_format_exhaustive() {

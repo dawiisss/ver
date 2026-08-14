@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-VERSION="${1:-1.0.0}"
+VERSION="${1:-1.1.0}"
 VERSION="${VERSION#v}"
 APP_NAME="ver"
 ARCH="amd64"
