@@ -4,6 +4,7 @@ use libadwaita::prelude::*;
 
 use crate::models::{
     AdvancedSettings, Connection, Protocol, RdpCertHandling, RdpColorDepth, RdpNetworkProfile,
+    RdpSecurityProtocol,
 };
 
 pub struct ConnectionEditor {
@@ -173,6 +174,27 @@ impl ConnectionEditor {
             .selected(cert_idx)
             .build();
 
+        let sec_model = gtk::StringList::new(&[
+            "Negotiate / Auto (Default)",
+            "NLA (Network Level Authentication)",
+            "TLS",
+            "RDP (Standard Security)",
+            "Extended NLA (EXT)",
+        ]);
+        let sec_idx = match conn.advanced_settings.rdp_security {
+            RdpSecurityProtocol::Auto => 0,
+            RdpSecurityProtocol::Nla => 1,
+            RdpSecurityProtocol::Tls => 2,
+            RdpSecurityProtocol::Rdp => 3,
+            RdpSecurityProtocol::Ext => 4,
+        };
+        let combo_rdp_security = adw::ComboRow::builder()
+            .title("Security Protocol")
+            .subtitle("Protocol negotiation (NLA, TLS, RDP, Auto)")
+            .model(&sec_model)
+            .selected(sec_idx)
+            .build();
+
         let entry_rdp_domain = adw::EntryRow::builder()
             .title("Domain")
             .text(&conn.advanced_settings.rdp_domain)
@@ -184,6 +206,7 @@ impl ConnectionEditor {
             .build();
 
         group_rdp_security.add(&combo_rdp_cert);
+        group_rdp_security.add(&combo_rdp_security);
         group_rdp_security.add(&entry_rdp_domain);
         group_rdp_security.add(&entry_rdp_gateway);
         page.add(&group_rdp_security);
@@ -652,6 +675,14 @@ impl ConnectionEditor {
                 _ => RdpCertHandling::Ignore,
             };
 
+            let rdp_security = match combo_rdp_security.selected() {
+                1 => RdpSecurityProtocol::Nla,
+                2 => RdpSecurityProtocol::Tls,
+                3 => RdpSecurityProtocol::Rdp,
+                4 => RdpSecurityProtocol::Ext,
+                _ => RdpSecurityProtocol::Auto,
+            };
+
             let group_str = entry_group.text().to_string();
             let group = if group_str.trim().is_empty() {
                 "Default".to_string()
@@ -679,6 +710,7 @@ impl ConnectionEditor {
                     rdp_custom_resolution: entry_rdp_custom_res.text().to_string(),
                     rdp_network_profile,
                     rdp_cert_handling,
+                    rdp_security,
                     rdp_disable_wallpaper: switch_rdp_disable_wallpaper.is_active(),
                     rdp_disable_themes: switch_rdp_disable_themes.is_active(),
                     rdp_disable_animations: switch_rdp_disable_animations.is_active(),

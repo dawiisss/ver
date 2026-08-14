@@ -1,4 +1,6 @@
-use crate::models::{Connection, RdpCertHandling, RdpColorDepth, RdpNetworkProfile};
+use crate::models::{
+    Connection, RdpCertHandling, RdpColorDepth, RdpNetworkProfile, RdpSecurityProtocol,
+};
 use std::env;
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
@@ -53,6 +55,25 @@ pub fn build_rdp_args(conn: &Connection, password: Option<&str>) -> Vec<String> 
 
     if !conn.advanced_settings.rdp_domain.trim().is_empty() {
         args.push(format!("/d:{}", conn.advanced_settings.rdp_domain.trim()));
+    }
+
+    match conn.advanced_settings.rdp_security {
+        RdpSecurityProtocol::Auto => {
+            args.push("/auth-pkg-list:!kerberos".to_string());
+        }
+        RdpSecurityProtocol::Nla => {
+            args.push("/sec:nla".to_string());
+            args.push("/auth-pkg-list:!kerberos".to_string());
+        }
+        RdpSecurityProtocol::Tls => {
+            args.push("/sec:tls".to_string());
+        }
+        RdpSecurityProtocol::Rdp => {
+            args.push("/sec:rdp".to_string());
+        }
+        RdpSecurityProtocol::Ext => {
+            args.push("/sec:ext".to_string());
+        }
     }
 
     match conn.advanced_settings.rdp_cert_handling {
@@ -586,6 +607,31 @@ mod tests {
         conn.advanced_settings.rdp_cert_handling = RdpCertHandling::Ask;
         let ask_args = build_rdp_args(&conn, None);
         assert!(!ask_args.iter().any(|a| a.starts_with("/cert:")));
+    }
+
+    #[test]
+    fn test_build_rdp_args_security_protocols() {
+        let mut conn = Connection {
+            host: "10.0.0.1".to_string(),
+            ..Default::default()
+        };
+
+        conn.advanced_settings.rdp_security = RdpSecurityProtocol::Auto;
+        assert!(build_rdp_args(&conn, None).contains(&"/auth-pkg-list:!kerberos".to_string()));
+
+        conn.advanced_settings.rdp_security = RdpSecurityProtocol::Nla;
+        let nla_args = build_rdp_args(&conn, None);
+        assert!(nla_args.contains(&"/sec:nla".to_string()));
+        assert!(nla_args.contains(&"/auth-pkg-list:!kerberos".to_string()));
+
+        conn.advanced_settings.rdp_security = RdpSecurityProtocol::Tls;
+        assert!(build_rdp_args(&conn, None).contains(&"/sec:tls".to_string()));
+
+        conn.advanced_settings.rdp_security = RdpSecurityProtocol::Rdp;
+        assert!(build_rdp_args(&conn, None).contains(&"/sec:rdp".to_string()));
+
+        conn.advanced_settings.rdp_security = RdpSecurityProtocol::Ext;
+        assert!(build_rdp_args(&conn, None).contains(&"/sec:ext".to_string()));
     }
 
     #[test]

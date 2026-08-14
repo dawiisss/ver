@@ -147,6 +147,36 @@ impl std::fmt::Display for RdpCertHandling {
     }
 }
 
+/// RDP Security Protocol negotiation options for FreeRDP.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum RdpSecurityProtocol {
+    #[default]
+    Auto,
+    Nla,
+    Tls,
+    Rdp,
+    Ext,
+}
+
+impl RdpSecurityProtocol {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            RdpSecurityProtocol::Auto => "auto",
+            RdpSecurityProtocol::Nla => "nla",
+            RdpSecurityProtocol::Tls => "tls",
+            RdpSecurityProtocol::Rdp => "rdp",
+            RdpSecurityProtocol::Ext => "ext",
+        }
+    }
+}
+
+impl std::fmt::Display for RdpSecurityProtocol {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
 /// Advanced settings per connection.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
@@ -174,6 +204,8 @@ pub struct AdvancedSettings {
     pub rdp_color_depth: RdpColorDepth,
     #[serde(default)]
     pub rdp_cert_handling: RdpCertHandling,
+    #[serde(default)]
+    pub rdp_security: RdpSecurityProtocol,
     pub spice_fullscreen: bool,
     pub spice_usb_redirect: bool,
     pub spice_scale_to_window: bool,
@@ -216,6 +248,7 @@ impl Default for AdvancedSettings {
             color_depth: 0,
             rdp_color_depth: RdpColorDepth::Automatic,
             rdp_cert_handling: RdpCertHandling::Ignore,
+            rdp_security: RdpSecurityProtocol::Auto,
             vnc_fullscreen: false,
             vnc_clipboard: true,
             vnc_color_level: VncColorLevel::Full,
@@ -544,6 +577,42 @@ mod tests {
         assert_eq!(h_tofu, RdpCertHandling::Tofu);
         assert_eq!(h_deny, RdpCertHandling::Deny);
         assert_eq!(h_ask, RdpCertHandling::Ask);
+    }
+
+    #[test]
+    fn test_rdp_security_protocol_serde_representations() {
+        assert_eq!(
+            serde_json::to_string(&RdpSecurityProtocol::Auto).unwrap(),
+            r#""auto""#
+        );
+        assert_eq!(
+            serde_json::to_string(&RdpSecurityProtocol::Nla).unwrap(),
+            r#""nla""#
+        );
+        assert_eq!(
+            serde_json::to_string(&RdpSecurityProtocol::Tls).unwrap(),
+            r#""tls""#
+        );
+        assert_eq!(
+            serde_json::to_string(&RdpSecurityProtocol::Rdp).unwrap(),
+            r#""rdp""#
+        );
+        assert_eq!(
+            serde_json::to_string(&RdpSecurityProtocol::Ext).unwrap(),
+            r#""ext""#
+        );
+
+        let s_auto: RdpSecurityProtocol = serde_json::from_str(r#""auto""#).unwrap();
+        let s_nla: RdpSecurityProtocol = serde_json::from_str(r#""nla""#).unwrap();
+        let s_tls: RdpSecurityProtocol = serde_json::from_str(r#""tls""#).unwrap();
+        let s_rdp: RdpSecurityProtocol = serde_json::from_str(r#""rdp""#).unwrap();
+        let s_ext: RdpSecurityProtocol = serde_json::from_str(r#""ext""#).unwrap();
+
+        assert_eq!(s_auto, RdpSecurityProtocol::Auto);
+        assert_eq!(s_nla, RdpSecurityProtocol::Nla);
+        assert_eq!(s_tls, RdpSecurityProtocol::Tls);
+        assert_eq!(s_rdp, RdpSecurityProtocol::Rdp);
+        assert_eq!(s_ext, RdpSecurityProtocol::Ext);
     }
 
     #[test]
