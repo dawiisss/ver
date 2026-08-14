@@ -119,6 +119,34 @@ pub enum RdpNetworkProfile {
     Modem,
 }
 
+/// RDP TLS certificate verification policies for FreeRDP.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum RdpCertHandling {
+    #[default]
+    Ignore,
+    Tofu,
+    Deny,
+    Ask,
+}
+
+impl RdpCertHandling {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            RdpCertHandling::Ignore => "ignore",
+            RdpCertHandling::Tofu => "tofu",
+            RdpCertHandling::Deny => "deny",
+            RdpCertHandling::Ask => "ask",
+        }
+    }
+}
+
+impl std::fmt::Display for RdpCertHandling {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
 /// Advanced settings per connection.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
@@ -144,6 +172,8 @@ pub struct AdvancedSettings {
     pub color_depth: u8,
     #[serde(default)]
     pub rdp_color_depth: RdpColorDepth,
+    #[serde(default)]
+    pub rdp_cert_handling: RdpCertHandling,
     pub spice_fullscreen: bool,
     pub spice_usb_redirect: bool,
     pub spice_scale_to_window: bool,
@@ -185,6 +215,7 @@ impl Default for AdvancedSettings {
             clipboard_sharing: false,
             color_depth: 0,
             rdp_color_depth: RdpColorDepth::Automatic,
+            rdp_cert_handling: RdpCertHandling::Ignore,
             vnc_fullscreen: false,
             vnc_clipboard: true,
             vnc_color_level: VncColorLevel::Full,
@@ -483,6 +514,36 @@ mod tests {
         let c_med: VncColorLevel = serde_json::from_str(r#""Medium""#).unwrap();
         assert_eq!(c_full, VncColorLevel::Full);
         assert_eq!(c_med, VncColorLevel::Medium);
+    }
+
+    #[test]
+    fn test_rdp_cert_handling_serde_representations() {
+        assert_eq!(
+            serde_json::to_string(&RdpCertHandling::Ignore).unwrap(),
+            r#""ignore""#
+        );
+        assert_eq!(
+            serde_json::to_string(&RdpCertHandling::Tofu).unwrap(),
+            r#""tofu""#
+        );
+        assert_eq!(
+            serde_json::to_string(&RdpCertHandling::Deny).unwrap(),
+            r#""deny""#
+        );
+        assert_eq!(
+            serde_json::to_string(&RdpCertHandling::Ask).unwrap(),
+            r#""ask""#
+        );
+
+        let h_ignore: RdpCertHandling = serde_json::from_str(r#""ignore""#).unwrap();
+        let h_tofu: RdpCertHandling = serde_json::from_str(r#""tofu""#).unwrap();
+        let h_deny: RdpCertHandling = serde_json::from_str(r#""deny""#).unwrap();
+        let h_ask: RdpCertHandling = serde_json::from_str(r#""ask""#).unwrap();
+
+        assert_eq!(h_ignore, RdpCertHandling::Ignore);
+        assert_eq!(h_tofu, RdpCertHandling::Tofu);
+        assert_eq!(h_deny, RdpCertHandling::Deny);
+        assert_eq!(h_ask, RdpCertHandling::Ask);
     }
 
     #[test]

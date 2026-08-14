@@ -1,4 +1,4 @@
-use crate::models::{Connection, RdpColorDepth, RdpNetworkProfile};
+use crate::models::{Connection, RdpCertHandling, RdpColorDepth, RdpNetworkProfile};
 use std::env;
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
@@ -55,7 +55,13 @@ pub fn build_rdp_args(conn: &Connection, password: Option<&str>) -> Vec<String> 
         args.push(format!("/d:{}", conn.advanced_settings.rdp_domain.trim()));
     }
 
-    args.push("/cert:ignore".to_string());
+    match conn.advanced_settings.rdp_cert_handling {
+        RdpCertHandling::Ignore => args.push("/cert:ignore".to_string()),
+        RdpCertHandling::Tofu => args.push("/cert:tofu".to_string()),
+        RdpCertHandling::Deny => args.push("/cert:deny".to_string()),
+        RdpCertHandling::Ask => {} // Omit flag to use FreeRDP default
+    }
+
     if conn.advanced_settings.rdp_dynamic_resolution {
         args.push("/dynamic-resolution".to_string());
     }
@@ -559,6 +565,27 @@ mod tests {
 
         let args = build_rdp_args(&conn, None);
         assert!(args.contains(&"/v:10.0.0.1:3389".to_string()));
+    }
+
+    #[test]
+    fn test_build_rdp_args_cert_handling_modes() {
+        let mut conn = Connection {
+            host: "10.0.0.1".to_string(),
+            ..Default::default()
+        };
+
+        conn.advanced_settings.rdp_cert_handling = RdpCertHandling::Ignore;
+        assert!(build_rdp_args(&conn, None).contains(&"/cert:ignore".to_string()));
+
+        conn.advanced_settings.rdp_cert_handling = RdpCertHandling::Tofu;
+        assert!(build_rdp_args(&conn, None).contains(&"/cert:tofu".to_string()));
+
+        conn.advanced_settings.rdp_cert_handling = RdpCertHandling::Deny;
+        assert!(build_rdp_args(&conn, None).contains(&"/cert:deny".to_string()));
+
+        conn.advanced_settings.rdp_cert_handling = RdpCertHandling::Ask;
+        let ask_args = build_rdp_args(&conn, None);
+        assert!(!ask_args.iter().any(|a| a.starts_with("/cert:")));
     }
 
     #[test]

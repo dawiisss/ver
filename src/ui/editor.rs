@@ -2,7 +2,9 @@ use gtk::prelude::*;
 use libadwaita as adw;
 use libadwaita::prelude::*;
 
-use crate::models::{AdvancedSettings, Connection, Protocol, RdpColorDepth, RdpNetworkProfile};
+use crate::models::{
+    AdvancedSettings, Connection, Protocol, RdpCertHandling, RdpColorDepth, RdpNetworkProfile,
+};
 
 pub struct ConnectionEditor {
     pub connection: Connection,
@@ -206,6 +208,25 @@ impl ConnectionEditor {
             .selected(network_idx)
             .build();
 
+        let cert_model = gtk::StringList::new(&[
+            "Ignore (Accept all certificates)",
+            "Trust on First Use (TOFU)",
+            "Strict (Reject untrusted)",
+            "Prompt / Ask (Default)",
+        ]);
+        let cert_idx = match conn.advanced_settings.rdp_cert_handling {
+            RdpCertHandling::Ignore => 0,
+            RdpCertHandling::Tofu => 1,
+            RdpCertHandling::Deny => 2,
+            RdpCertHandling::Ask => 3,
+        };
+        let combo_rdp_cert = adw::ComboRow::builder()
+            .title("Certificate Validation")
+            .subtitle("Configure TLS certificate verification policy")
+            .model(&cert_model)
+            .selected(cert_idx)
+            .build();
+
         let switch_rdp_disable_wallpaper = adw::SwitchRow::builder()
             .title("Disable Wallpaper")
             .active(conn.advanced_settings.rdp_disable_wallpaper)
@@ -264,6 +285,7 @@ impl ConnectionEditor {
         group_rdp.add(&entry_rdp_gateway);
         group_rdp.add(&entry_rdp_shared_folder);
         group_rdp.add(&combo_rdp_network);
+        group_rdp.add(&combo_rdp_cert);
         group_rdp.add(&switch_rdp_dynamic_res);
         group_rdp.add(&entry_rdp_custom_res);
         group_rdp.add(&switch_rdp_glyph_cache);
@@ -611,6 +633,13 @@ impl ConnectionEditor {
                 _ => RdpNetworkProfile::Auto,
             };
 
+            let rdp_cert_handling = match combo_rdp_cert.selected() {
+                1 => RdpCertHandling::Tofu,
+                2 => RdpCertHandling::Deny,
+                3 => RdpCertHandling::Ask,
+                _ => RdpCertHandling::Ignore,
+            };
+
             let group_str = entry_group.text().to_string();
             let group = if group_str.trim().is_empty() {
                 "Default".to_string()
@@ -637,6 +666,7 @@ impl ConnectionEditor {
                     rdp_dynamic_resolution: switch_rdp_dynamic_res.is_active(),
                     rdp_custom_resolution: entry_rdp_custom_res.text().to_string(),
                     rdp_network_profile,
+                    rdp_cert_handling,
                     rdp_disable_wallpaper: switch_rdp_disable_wallpaper.is_active(),
                     rdp_disable_themes: switch_rdp_disable_themes.is_active(),
                     rdp_disable_animations: switch_rdp_disable_animations.is_active(),
