@@ -1,10 +1,14 @@
 #!/bin/bash
 set -e
 
-VERSION="${1:-1.0.0}"
+VERSION="${1:-$(grep '^version' Cargo.toml | head -1 | cut -d '"' -f 2)}"
+VERSION="${VERSION:-1.0.0}"
 VERSION="${VERSION#v}"
 APP_NAME="ver"
 APPIMAGE_NAME="${APP_NAME}-${VERSION}-x86_64.AppImage"
+
+echo "Compiling release binary with cargo..."
+cargo build --release
 
 echo "Preparing AppDir for $APPIMAGE_NAME..."
 rm -rf AppDir

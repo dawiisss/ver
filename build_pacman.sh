@@ -1,11 +1,15 @@
 #!/bin/bash
 set -e
 
-VERSION="${1:-1.0.0}"
+VERSION="${1:-$(grep '^version' Cargo.toml | head -1 | cut -d '"' -f 2)}"
+VERSION="${VERSION:-1.0.0}"
 VERSION="${VERSION#v}"
 APP_NAME="ver"
 PKG_DIR="$(mktemp -d)"
 PKG_TAR="${APP_NAME}-${VERSION}-1-x86_64.pkg.tar.zst"
+
+echo "Compiling release binary with cargo..."
+cargo build --release
 
 echo "Building Arch Linux pacman package for version $VERSION..."
 
