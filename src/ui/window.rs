@@ -998,7 +998,7 @@ impl MainWindow {
                 .developer_name("dawiisss")
                 .version(env!("CARGO_PKG_VERSION"))
                 .comments("GTK4 / Libadwaita Remote Connection Manager in Rust")
-                .license_type(gtk::License::Gpl30)
+                .license_type(gtk::License::MitX11)
                 .transient_for(&window_for_about)
                 .modal(true)
                 .build();

@@ -3,7 +3,7 @@
 [![Rust](https://img.shields.io/badge/Rust-1.75+-orange.svg)](https://www.rust-lang.org)
 [![GTK4](https://img.shields.io/badge/GTK-4.0-blue.svg)](https://www.gtk.org)
 [![Libadwaita](https://img.shields.io/badge/Libadwaita-1.4+-purple.svg)](https://gnome.pages.gitlab.gnome.org/libadwaita/)
-[![License: GPL-3.0](https://img.shields.io/badge/License-GPL3-green.svg)](https://www.gnu.org/licenses/gpl-3.0)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 **VER (Very Easy Remote)** is a modern, native Linux Remote Connection Manager built from the ground up in **Rust**, **GTK4**, and **Libadwaita**. It provides a fast, secure, and intuitive interface for managing and connecting to remote infrastructure via RDP, XRDP, VNC, SSH, and SPICE.
 
@@ -135,5 +135,5 @@ cargo clippy --all-targets --all-features -- -D warnings
 
 ## 📄 License & Changelog
 
-* **License**: Distributed under the [GNU General Public License v3.0](LICENSE).
+* **License**: Distributed under the [MIT License](LICENSE).
 * **Changelog**: See [CHANGELOG.md](CHANGELOG.md) for detailed version history and release notes.

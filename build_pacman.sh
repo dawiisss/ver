@@ -34,7 +34,7 @@ builddate = $BUILD_DATE
 packager = VER Team
 size = $SIZE
 arch = x86_64
-license = GPL3
+license = MIT
 depend = gtk4
 depend = libadwaita
 EOF
