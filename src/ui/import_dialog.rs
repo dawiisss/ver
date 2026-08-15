@@ -34,7 +34,10 @@ impl ImportDialog {
             .build();
 
         let header_bar = adw::HeaderBar::new();
-        let title = adw::WindowTitle::new("Import Connections", "Migrate from Remmina, SSH, RDP, or JSON");
+        let title = adw::WindowTitle::new(
+            "Import Connections",
+            "Migrate from Remmina, SSH, RDP, or JSON",
+        );
         header_bar.set_title_widget(Some(&title));
 
         let toolbar_view = adw::ToolbarView::new();
@@ -117,8 +120,14 @@ impl ImportDialog {
         let candidates: Rc<RefCell<Vec<ImportCandidate>>> = Rc::new(RefCell::new(Vec::new()));
 
         let select_all_box = gtk::Box::new(gtk::Orientation::Horizontal, 8);
-        let select_all_btn = gtk::Button::builder().label("Select All").css_classes(vec!["flat"]).build();
-        let deselect_all_btn = gtk::Button::builder().label("Deselect All").css_classes(vec!["flat"]).build();
+        let select_all_btn = gtk::Button::builder()
+            .label("Select All")
+            .css_classes(vec!["flat"])
+            .build();
+        let deselect_all_btn = gtk::Button::builder()
+            .label("Deselect All")
+            .css_classes(vec!["flat"])
+            .build();
         select_all_box.append(&select_all_btn);
         select_all_box.append(&deselect_all_btn);
         select_all_box.set_visible(false);
@@ -304,7 +313,11 @@ impl ImportDialog {
                             match source_idx {
                                 0 => {
                                     if let Ok(conn) = import_remmina_file(&path) {
-                                        let desc = path.file_name().and_then(|s| s.to_str()).unwrap_or("Remmina").to_string();
+                                        let desc = path
+                                            .file_name()
+                                            .and_then(|s| s.to_str())
+                                            .unwrap_or("Remmina")
+                                            .to_string();
                                         found.push(ImportCandidate {
                                             connection: conn,
                                             source_desc: desc,
@@ -314,7 +327,11 @@ impl ImportDialog {
                                 }
                                 1 => {
                                     if let Ok(conns) = import_ssh_config_file(&path) {
-                                        let desc = path.file_name().and_then(|s| s.to_str()).unwrap_or("SSH Config").to_string();
+                                        let desc = path
+                                            .file_name()
+                                            .and_then(|s| s.to_str())
+                                            .unwrap_or("SSH Config")
+                                            .to_string();
                                         for conn in conns {
                                             found.push(ImportCandidate {
                                                 connection: conn,
@@ -326,7 +343,11 @@ impl ImportDialog {
                                 }
                                 2 => {
                                     if let Ok(conn) = import_rdp_file(&path) {
-                                        let desc = path.file_name().and_then(|s| s.to_str()).unwrap_or("RDP File").to_string();
+                                        let desc = path
+                                            .file_name()
+                                            .and_then(|s| s.to_str())
+                                            .unwrap_or("RDP File")
+                                            .to_string();
                                         found.push(ImportCandidate {
                                             connection: conn,
                                             source_desc: desc,
@@ -337,7 +358,11 @@ impl ImportDialog {
                                 3 => {
                                     if let Ok(content) = std::fs::read_to_string(&path) {
                                         if let Ok(conns) = import_connections_json(&content) {
-                                            let desc = path.file_name().and_then(|s| s.to_str()).unwrap_or("JSON Backup").to_string();
+                                            let desc = path
+                                                .file_name()
+                                                .and_then(|s| s.to_str())
+                                                .unwrap_or("JSON Backup")
+                                                .to_string();
                                             for conn in conns {
                                                 found.push(ImportCandidate {
                                                     connection: conn,

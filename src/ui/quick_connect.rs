@@ -341,34 +341,30 @@ impl QuickConnectDialog {
         let on_connect_clone = on_connect.clone();
         let get_conn_connect = get_connection.clone();
         let win_weak_conn = window.downgrade();
-        connect_btn.connect_clicked(move |_| {
-            match get_conn_connect() {
-                Ok((conn, pass)) => {
-                    if let Some(win) = win_weak_conn.upgrade() {
-                        win.close();
-                    }
-                    on_connect_clone(conn, pass);
+        connect_btn.connect_clicked(move |_| match get_conn_connect() {
+            Ok((conn, pass)) => {
+                if let Some(win) = win_weak_conn.upgrade() {
+                    win.close();
                 }
-                Err(e) => {
-                    eprintln!("Quick Connect validation error: {}", e);
-                }
+                on_connect_clone(conn, pass);
+            }
+            Err(e) => {
+                eprintln!("Quick Connect validation error: {}", e);
             }
         });
 
         // Save & Connect
         let on_save_connect = Rc::new(on_save_connect);
         let win_weak_save = window.downgrade();
-        save_connect_btn.connect_clicked(move |_| {
-            match get_connection() {
-                Ok((conn, pass)) => {
-                    if let Some(win) = win_weak_save.upgrade() {
-                        win.close();
-                    }
-                    on_save_connect(conn, pass);
+        save_connect_btn.connect_clicked(move |_| match get_connection() {
+            Ok((conn, pass)) => {
+                if let Some(win) = win_weak_save.upgrade() {
+                    win.close();
                 }
-                Err(e) => {
-                    eprintln!("Quick Connect validation error: {}", e);
-                }
+                on_save_connect(conn, pass);
+            }
+            Err(e) => {
+                eprintln!("Quick Connect validation error: {}", e);
             }
         });
 

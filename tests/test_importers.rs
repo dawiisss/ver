@@ -128,10 +128,7 @@ fn test_rdp_file_import_and_export_roundtrip() {
     assert_eq!(conn.advanced_settings.rdp_domain, "WORK");
     assert!(conn.advanced_settings.rdp_fullscreen);
     assert!(conn.advanced_settings.rdp_multimon);
-    assert_eq!(
-        conn.advanced_settings.rdp_custom_resolution,
-        "2560x1440"
-    );
+    assert_eq!(conn.advanced_settings.rdp_custom_resolution, "2560x1440");
     assert_eq!(
         conn.advanced_settings.rdp_cert_handling,
         RdpCertHandling::Ignore
@@ -178,15 +175,21 @@ fn test_conflict_merge_strategies() {
 
     // 1. Skip Strategy
     let mut list = vec![base_conn.clone()];
-    let (added, updated, skipped) =
-        merge_imported_connections(&mut list, vec![incoming.clone()], ImportConflictStrategy::SkipDuplicates);
+    let (added, updated, skipped) = merge_imported_connections(
+        &mut list,
+        vec![incoming.clone()],
+        ImportConflictStrategy::SkipDuplicates,
+    );
     assert_eq!((added, updated, skipped), (0, 0, 1));
     assert_eq!(list[0].username, "");
 
     // 2. Overwrite Strategy
     let mut list = vec![base_conn.clone()];
-    let (added, updated, skipped) =
-        merge_imported_connections(&mut list, vec![incoming.clone()], ImportConflictStrategy::Overwrite);
+    let (added, updated, skipped) = merge_imported_connections(
+        &mut list,
+        vec![incoming.clone()],
+        ImportConflictStrategy::Overwrite,
+    );
     assert_eq!((added, updated, skipped), (0, 1, 0));
     assert_eq!(list[0].username, "new_admin");
 

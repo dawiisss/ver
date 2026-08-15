@@ -66,7 +66,11 @@ pub fn import_remmina_content(
     let fallback_name = file_name
         .and_then(|f| Path::new(f).file_stem())
         .and_then(|s| s.to_str())
-        .unwrap_or(if host.is_empty() { "Imported Remmina" } else { &host });
+        .unwrap_or(if host.is_empty() {
+            "Imported Remmina"
+        } else {
+            &host
+        });
 
     let name = props
         .get("name")
@@ -100,7 +104,10 @@ pub fn import_remmina_content(
 
     // Cert Handling
     let cert_ignore = props.get("cert_ignore").map(|v| v == "1").unwrap_or(false)
-        || props.get("ignore-tls-errors").map(|v| v == "1").unwrap_or(false);
+        || props
+            .get("ignore-tls-errors")
+            .map(|v| v == "1")
+            .unwrap_or(false);
     let rdp_cert_handling = if cert_ignore {
         RdpCertHandling::Ignore
     } else {
@@ -108,7 +115,10 @@ pub fn import_remmina_content(
     };
 
     // Security Protocol
-    let sec_str = props.get("security").map(|s| s.to_lowercase()).unwrap_or_default();
+    let sec_str = props
+        .get("security")
+        .map(|s| s.to_lowercase())
+        .unwrap_or_default();
     let rdp_security = match sec_str.as_str() {
         "nla" => RdpSecurityProtocol::Nla,
         "tls" => RdpSecurityProtocol::Tls,
@@ -118,10 +128,19 @@ pub fn import_remmina_content(
 
     // Booleans
     let multimon = props.get("multimon").map(|v| v == "1").unwrap_or(false)
-        || props.get("force_multimon").map(|v| v == "1").unwrap_or(false);
+        || props
+            .get("force_multimon")
+            .map(|v| v == "1")
+            .unwrap_or(false);
     let fullscreen = props.get("viewmode").map(|v| v == "1").unwrap_or(false)
-        || props.get("window_maximize").map(|v| v == "1").unwrap_or(false);
-    let disable_clipboard = props.get("disableclipboard").map(|v| v == "1").unwrap_or(false);
+        || props
+            .get("window_maximize")
+            .map(|v| v == "1")
+            .unwrap_or(false);
+    let disable_clipboard = props
+        .get("disableclipboard")
+        .map(|v| v == "1")
+        .unwrap_or(false);
     let sound_val = props.get("sound").map(|s| s.as_str()).unwrap_or("off");
     let audio = sound_val != "off" && sound_val != "none";
     let microphone = props.get("microphone").map(|v| v == "1").unwrap_or(false);

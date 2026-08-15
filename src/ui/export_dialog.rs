@@ -167,9 +167,18 @@ impl ExportDialog {
                     }
 
                     let subtitle = if cand.connection.username.is_empty() {
-                        format!("{}:{} [{}]", cand.connection.host, cand.connection.port, cand.connection.group)
+                        format!(
+                            "{}:{} [{}]",
+                            cand.connection.host, cand.connection.port, cand.connection.group
+                        )
                     } else {
-                        format!("{}@{}:{} [{}]", cand.connection.username, cand.connection.host, cand.connection.port, cand.connection.group)
+                        format!(
+                            "{}@{}:{} [{}]",
+                            cand.connection.username,
+                            cand.connection.host,
+                            cand.connection.port,
+                            cand.connection.group
+                        )
                     };
 
                     let row = adw::ActionRow::builder()
@@ -193,7 +202,10 @@ impl ExportDialog {
                         let count = candidates_clone
                             .borrow()
                             .iter()
-                            .filter(|c| (!is_rdp || c.connection.protocol == Protocol::Rdp) && *c.selected.borrow())
+                            .filter(|c| {
+                                (!is_rdp || c.connection.protocol == Protocol::Rdp)
+                                    && *c.selected.borrow()
+                            })
                             .count();
                         export_btn_clone.set_label(&format!("Export Selected ({})...", count));
                         export_btn_clone.set_sensitive(count > 0);
@@ -259,7 +271,10 @@ impl ExportDialog {
             let target_conns: Vec<Connection> = candidates_export
                 .borrow()
                 .iter()
-                .filter(|c| (!is_rdp_format || c.connection.protocol == Protocol::Rdp) && *c.selected.borrow())
+                .filter(|c| {
+                    (!is_rdp_format || c.connection.protocol == Protocol::Rdp)
+                        && *c.selected.borrow()
+                })
                 .map(|c| c.connection.clone())
                 .collect();
 
@@ -274,7 +289,11 @@ impl ExportDialog {
                     .unwrap_or_else(|| "connection.rdp".to_string());
                 (name, "RDP Configuration Files (*.rdp)", "*.rdp")
             } else {
-                ("ver_backup.json".to_string(), "JSON Files (*.json)", "*.json")
+                (
+                    "ver_backup.json".to_string(),
+                    "JSON Files (*.json)",
+                    "*.json",
+                )
             };
 
             let save_dialog = gtk::FileChooserNative::new(

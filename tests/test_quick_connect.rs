@@ -11,7 +11,8 @@ fn test_parse_schemed_uris() {
     assert_eq!(conn.port, 2222);
 
     // RDP URI
-    let conn = parse_quick_connect("rdp://corp_admin@remote.company.com:3399", Protocol::Ssh).unwrap();
+    let conn =
+        parse_quick_connect("rdp://corp_admin@remote.company.com:3399", Protocol::Ssh).unwrap();
     assert_eq!(conn.protocol, Protocol::Rdp);
     assert_eq!(conn.username, "corp_admin");
     assert_eq!(conn.host, "remote.company.com");

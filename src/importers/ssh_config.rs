@@ -84,10 +84,7 @@ pub fn import_ssh_config_content(content: &str) -> Result<Vec<Connection>, Impor
             .or(global_defaults.user.clone())
             .unwrap_or_default();
 
-        let port = block
-            .port
-            .or(global_defaults.port)
-            .unwrap_or(22);
+        let port = block.port.or(global_defaults.port).unwrap_or(22);
 
         let identity_file = block
             .identity_file

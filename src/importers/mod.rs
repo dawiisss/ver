@@ -3,8 +3,8 @@ pub mod rdp_file;
 pub mod remmina;
 pub mod ssh_config;
 
-use std::fmt;
 use crate::models::Connection;
+use std::fmt;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ImportConflictStrategy {

@@ -62,11 +62,18 @@ pub fn import_rdp_content(
     let fallback_name = file_name
         .and_then(|f| Path::new(f).file_stem())
         .and_then(|s| s.to_str())
-        .unwrap_or(if host.is_empty() { "Imported RDP" } else { &host });
+        .unwrap_or(if host.is_empty() {
+            "Imported RDP"
+        } else {
+            &host
+        });
 
     let username = string_props.get("username").cloned().unwrap_or_default();
     let domain = string_props.get("domain").cloned().unwrap_or_default();
-    let gateway = string_props.get("gatewayhostname").cloned().unwrap_or_default();
+    let gateway = string_props
+        .get("gatewayhostname")
+        .cloned()
+        .unwrap_or_default();
     let shared_folder = string_props
         .get("drivestoredirect")
         .cloned()
@@ -229,11 +236,7 @@ pub fn export_rdp_file(conn: &Connection) -> String {
     lines.push("negotiate security layer:i:1".to_string());
 
     if !conn.advanced_settings.rdp_custom_resolution.is_empty() {
-        if let Some((w, h)) = conn
-            .advanced_settings
-            .rdp_custom_resolution
-            .split_once('x')
-        {
+        if let Some((w, h)) = conn.advanced_settings.rdp_custom_resolution.split_once('x') {
             if let (Ok(width), Ok(height)) = (w.trim().parse::<u32>(), h.trim().parse::<u32>()) {
                 lines.push(format!("desktopwidth:i:{}", width));
                 lines.push(format!("desktopheight:i:{}", height));
