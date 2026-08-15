@@ -118,6 +118,21 @@ pub async fn delete_password(id: &str) -> Result<()> {
     Ok(())
 }
 
+use std::sync::OnceLock;
+
+static SHARED_RUNTIME: OnceLock<tokio::runtime::Runtime> = OnceLock::new();
+
+fn get_shared_runtime() -> &'static tokio::runtime::Runtime {
+    SHARED_RUNTIME.get_or_init(|| {
+        tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(1)
+            .enable_all()
+            .thread_name("ver-keyring-runtime")
+            .build()
+            .expect("Failed to initialize background Tokio runtime for secrets")
+    })
+}
+
 /// Synchronous wrapper around get_password for non-async contexts.
 pub fn get_password_sync(id: &str) -> Result<Option<String>> {
     if let Ok(handle) = tokio::runtime::Handle::try_current() {
@@ -125,15 +140,12 @@ pub fn get_password_sync(id: &str) -> Result<Option<String>> {
             let id = id.to_string();
             std::thread::spawn(move || handle.block_on(get_password(&id)))
                 .join()
-                .unwrap()
+                .unwrap_or_else(|_| Ok(None))
         } else {
             tokio::task::block_in_place(|| handle.block_on(get_password(id)))
         }
     } else {
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .context("Failed to create Tokio runtime")?;
+        let rt = get_shared_runtime();
         rt.block_on(get_password(id))
     }
 }
@@ -146,15 +158,12 @@ pub fn set_password_sync(id: &str, password: &str) -> Result<()> {
             let password = password.to_string();
             std::thread::spawn(move || handle.block_on(set_password(&id, &password)))
                 .join()
-                .unwrap()
+                .unwrap_or_else(|_| Ok(()))
         } else {
             tokio::task::block_in_place(|| handle.block_on(set_password(id, password)))
         }
     } else {
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .context("Failed to create Tokio runtime")?;
+        let rt = get_shared_runtime();
         rt.block_on(set_password(id, password))
     }
 }
@@ -166,15 +175,12 @@ pub fn delete_password_sync(id: &str) -> Result<()> {
             let id = id.to_string();
             std::thread::spawn(move || handle.block_on(delete_password(&id)))
                 .join()
-                .unwrap()
+                .unwrap_or_else(|_| Ok(()))
         } else {
             tokio::task::block_in_place(|| handle.block_on(delete_password(id)))
         }
     } else {
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .context("Failed to create Tokio runtime")?;
+        let rt = get_shared_runtime();
         rt.block_on(delete_password(id))
     }
 }

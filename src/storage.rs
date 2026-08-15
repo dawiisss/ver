@@ -44,7 +44,7 @@ pub fn to_json_4spaces<T: Serialize + ?Sized>(data: &T) -> Result<String> {
 fn backup_corrupt_file(path: &Path) {
     let timestamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
+        .map(|d| d.as_millis())
         .unwrap_or(0);
     let backup_path = PathBuf::from(format!("{}.corrupt.{}", path.display(), timestamp));
     if let Err(e) = fs::copy(path, &backup_path) {
@@ -100,6 +100,11 @@ pub fn save_connections_to_path(path: &Path, connections: &[Connection]) -> Resu
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
     fs::create_dir_all(parent)
         .with_context(|| format!("Failed to create directory structure for {:?}", parent))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = fs::set_permissions(parent, fs::Permissions::from_mode(0o700));
+    }
     let json_str = to_json_4spaces(connections)?;
     let mut temp_file = tempfile::NamedTempFile::new_in(parent)
         .with_context(|| format!("Failed to create temp file in {:?}", parent))?;
@@ -166,6 +171,11 @@ pub fn save_config_to_path(path: &Path, config: &AppConfig) -> Result<()> {
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
     fs::create_dir_all(parent)
         .with_context(|| format!("Failed to create directory structure for {:?}", parent))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = fs::set_permissions(parent, fs::Permissions::from_mode(0o700));
+    }
     let json_str = to_json_4spaces(config)?;
     let mut temp_file = tempfile::NamedTempFile::new_in(parent)
         .with_context(|| format!("Failed to create temp file in {:?}", parent))?;

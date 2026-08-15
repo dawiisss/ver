@@ -451,12 +451,26 @@ impl ConnectionEditor {
         group_spice.add(&switch_spice_scale_to_window);
         page.add(&group_spice);
 
+        // 4.6 Advanced SSH Settings
+        let group_ssh = adw::PreferencesGroup::builder()
+            .title("Advanced SSH Settings")
+            .build();
+
+        let entry_ssh_identity_file = adw::EntryRow::builder()
+            .title("Identity Key File (e.g. ~/.ssh/id_ed25519)")
+            .text(&conn.advanced_settings.ssh_identity_file)
+            .build();
+
+        group_ssh.add(&entry_ssh_identity_file);
+        page.add(&group_ssh);
+
         // Toggle Visibility based on Protocol
         let update_protocol_visibility = {
             let group_rdp = group_rdp.clone();
             let group_rdp_security = group_rdp_security.clone();
             let group_vnc = group_vnc.clone();
             let group_spice = group_spice.clone();
+            let group_ssh = group_ssh.clone();
             let entry_port = entry_port.clone();
             move |idx: u32, set_default_port: bool| {
                 match idx {
@@ -466,6 +480,7 @@ impl ConnectionEditor {
                         group_rdp_security.set_visible(true);
                         group_vnc.set_visible(false);
                         group_spice.set_visible(false);
+                        group_ssh.set_visible(false);
                         if set_default_port {
                             entry_port.set_text("3389");
                         }
@@ -476,6 +491,7 @@ impl ConnectionEditor {
                         group_rdp_security.set_visible(false);
                         group_vnc.set_visible(true);
                         group_spice.set_visible(false);
+                        group_ssh.set_visible(false);
                         if set_default_port {
                             entry_port.set_text("5900");
                         }
@@ -486,6 +502,7 @@ impl ConnectionEditor {
                         group_rdp_security.set_visible(false);
                         group_vnc.set_visible(false);
                         group_spice.set_visible(true);
+                        group_ssh.set_visible(false);
                         if set_default_port {
                             entry_port.set_text("5900");
                         }
@@ -496,6 +513,7 @@ impl ConnectionEditor {
                         group_rdp_security.set_visible(false);
                         group_vnc.set_visible(false);
                         group_spice.set_visible(false);
+                        group_ssh.set_visible(true);
                         if set_default_port {
                             entry_port.set_text("22");
                         }
@@ -734,6 +752,7 @@ impl ConnectionEditor {
                     spice_fullscreen: switch_spice_fullscreen.is_active(),
                     spice_usb_redirect: switch_spice_usb_redirect.is_active(),
                     spice_scale_to_window: switch_spice_scale_to_window.is_active(),
+                    ssh_identity_file: entry_ssh_identity_file.text().to_string(),
                 },
             };
 

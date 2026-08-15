@@ -133,70 +133,76 @@ impl DiscoveryDialog {
                 spinner.set_spinning(true);
                 status_label.set_text("Scanning local network for VNC, RDP, SSH hosts...");
 
-                #[allow(deprecated)]
-                let (sender, receiver) = glib::MainContext::channel::<Option<DiscoveredService>>(
-                    glib::Priority::default(),
-                );
+                let (sender, receiver) = async_channel::unbounded::<Option<DiscoveredService>>();
 
                 let is_scanning_receiver = is_scanning.clone();
-                receiver.attach(None, move |msg| {
-                    match msg {
-                        Some(service) => {
-                            let row = adw::ActionRow::builder()
-                                .title(&service.name)
-                                .subtitle(format!(
-                                    "{}:{} ({})",
-                                    service.host,
-                                    service.port,
-                                    service.protocol.to_uppercase()
-                                ))
-                                .build();
+                let spinner_local = spinner.clone();
+                let status_label_local = status_label.clone();
+                let list_box_local = list_box.clone();
+                let on_add_local = on_add.clone();
 
-                            let icon_name = match service.protocol.to_lowercase().as_str() {
-                                "vnc" => "computer-symbolic",
-                                "ssh" => "utilities-terminal-symbolic",
-                                "rdp" => "video-display-symbolic",
-                                _ => "display-symbolic",
-                            };
-                            let icon = gtk::Image::from_icon_name(icon_name);
-                            row.add_prefix(&icon);
+                glib::MainContext::default().spawn_local(async move {
+                    while let Ok(msg) = receiver.recv().await {
+                        match msg {
+                            Some(service) => {
+                                let row = adw::ActionRow::builder()
+                                    .title(&service.name)
+                                    .subtitle(format!(
+                                        "{}:{} ({})",
+                                        service.host,
+                                        service.port,
+                                        service.protocol.to_uppercase()
+                                    ))
+                                    .build();
 
-                            let add_btn = gtk::Button::builder()
-                                .label("Add")
-                                .css_classes(vec!["suggested-action"])
-                                .valign(gtk::Align::Center)
-                                .build();
-
-                            let service_clone = service.clone();
-                            let on_add_clone = on_add.clone();
-                            add_btn.connect_clicked(move |btn| {
-                                let proto = match service_clone.protocol.to_lowercase().as_str() {
-                                    "vnc" => Protocol::Vnc,
-                                    "ssh" => Protocol::Ssh,
-                                    _ => Protocol::Rdp,
+                                let icon_name = match service.protocol.to_lowercase().as_str() {
+                                    "vnc" => "computer-symbolic",
+                                    "ssh" => "utilities-terminal-symbolic",
+                                    "rdp" => "video-display-symbolic",
+                                    _ => "display-symbolic",
                                 };
-                                let mut conn = Connection::new_with_protocol(proto);
-                                conn.name = service_clone.name.clone();
-                                conn.host = service_clone.host.clone();
-                                conn.port = service_clone.port;
-                                conn.group = "Discovered".to_string();
+                                let icon = gtk::Image::from_icon_name(icon_name);
+                                row.add_prefix(&icon);
 
-                                on_add_clone(conn);
+                                let add_btn = gtk::Button::builder()
+                                    .label("Add")
+                                    .css_classes(vec!["suggested-action"])
+                                    .valign(gtk::Align::Center)
+                                    .build();
 
-                                btn.set_sensitive(false);
-                                btn.set_label("Added");
-                            });
+                                let service_clone = service.clone();
+                                let on_add_clone = on_add_local.clone();
+                                add_btn.connect_clicked(move |btn| {
+                                    let proto = match service_clone.protocol.to_lowercase().as_str()
+                                    {
+                                        "vnc" => Protocol::Vnc,
+                                        "ssh" => Protocol::Ssh,
+                                        _ => Protocol::Rdp,
+                                    };
+                                    let mut conn = Connection::new_with_protocol(proto);
+                                    conn.name = service_clone.name.clone();
+                                    conn.host = service_clone.host.clone();
+                                    conn.port = service_clone.port;
+                                    conn.group = "Discovered".to_string();
 
-                            row.add_suffix(&add_btn);
-                            list_box.append(&row);
-                        }
-                        None => {
-                            spinner.set_spinning(false);
-                            status_label.set_text("Scan complete.");
-                            is_scanning_receiver.store(false, std::sync::atomic::Ordering::SeqCst);
+                                    on_add_clone(conn);
+
+                                    btn.set_sensitive(false);
+                                    btn.set_label("Added");
+                                });
+
+                                row.add_suffix(&add_btn);
+                                list_box_local.append(&row);
+                            }
+                            None => {
+                                spinner_local.set_spinning(false);
+                                status_label_local.set_text("Scan complete.");
+                                is_scanning_receiver
+                                    .store(false, std::sync::atomic::Ordering::SeqCst);
+                                break;
+                            }
                         }
                     }
-                    glib::ControlFlow::Continue
                 });
 
                 // Spawn scanner thread pool
@@ -220,7 +226,7 @@ impl DiscoveryDialog {
                                         host: ip_str.to_string(),
                                         port,
                                     };
-                                    let _ = sender.send(Some(service));
+                                    let _ = sender.send_blocking(Some(service));
                                 }
                             }
                         }
@@ -276,7 +282,7 @@ impl DiscoveryDialog {
                                                 host: ip_str.clone(),
                                                 port,
                                             };
-                                            let _ = sender_clone.send(Some(service));
+                                            let _ = sender_clone.send_blocking(Some(service));
                                         }
                                     }
                                 }
@@ -289,7 +295,7 @@ impl DiscoveryDialog {
                         let _ = handle.join();
                     }
 
-                    let _ = sender.send(None);
+                    let _ = sender.send_blocking(None);
                 });
             };
 

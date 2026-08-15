@@ -1,3 +1,4 @@
+use gtk::gdk;
 use gtk::gio;
 use gtk::glib;
 use gtk::prelude::*;
@@ -8,15 +9,22 @@ use std::collections::{BTreeMap, HashMap};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
+use crate::importers::{merge_imported_connections, ImportConflictStrategy};
 use crate::launcher;
 use crate::models::{AppConfig, Connection, Protocol};
 use crate::network;
+use crate::prober::{self, HostStatus};
 use crate::secrets;
 use crate::storage;
 use crate::ui::discovery::DiscoveryDialog;
 use crate::ui::editor::ConnectionEditor;
+use crate::ui::export_dialog::ExportDialog;
+use crate::ui::import_dialog::ImportDialog;
 use crate::ui::preferences::{apply_theme, PreferencesWindow};
+use crate::ui::quick_connect::QuickConnectDialog;
+use crate::ui::shortcuts::ShortcutsDialog;
 
 #[derive(Clone)]
 pub struct ActiveSession {
@@ -33,6 +41,7 @@ pub struct AppWindowState {
     pub search_query: String,
     pub config: AppConfig,
     pub active_sessions: HashMap<String, ActiveSession>,
+    pub host_statuses: HashMap<String, HostStatus>,
 }
 
 pub struct MainWindow {
@@ -98,12 +107,45 @@ impl MainWindow {
         connections: Vec<Connection>,
         config: AppConfig,
     ) -> adw::ApplicationWindow {
+        // Load custom CSS for reachability status dots
+        let css_provider = gtk::CssProvider::new();
+        css_provider.load_from_data(
+            "
+            .status-dot {
+                min-width: 8px;
+                min-height: 8px;
+                border-radius: 9999px;
+                margin-right: 6px;
+            }
+            .status-online {
+                background-color: #2ec27e;
+            }
+            .status-offline {
+                background-color: #e01b24;
+            }
+            .status-probing {
+                background-color: #f6d32d;
+            }
+            .status-unknown {
+                background-color: #9a9996;
+            }
+            ",
+        );
+        if let Some(display) = gdk::Display::default() {
+            gtk::style_context_add_provider_for_display(
+                &display,
+                &css_provider,
+                gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
+            );
+        }
+
         let state = Rc::new(RefCell::new(AppWindowState {
             connections,
             selected_id: None,
             search_query: String::new(),
             config,
             active_sessions: HashMap::new(),
+            host_statuses: HashMap::new(),
         }));
 
         let window_title = adw::WindowTitle::builder()
@@ -118,26 +160,37 @@ impl MainWindow {
         // Start pack buttons
         let add_btn = gtk::Button::builder()
             .icon_name("list-add-symbolic")
-            .tooltip_text("Add New Connection")
+            .tooltip_text("Add New Connection (Ctrl+N)")
+            .build();
+
+        let quick_btn = gtk::Button::builder()
+            .icon_name("tab-new-symbolic")
+            .tooltip_text("Quick Connect (Ctrl+K)")
             .build();
 
         let search_toggle = gtk::ToggleButton::builder()
             .icon_name("system-search-symbolic")
-            .tooltip_text("Search Connections")
+            .tooltip_text("Search Connections (Ctrl+F)")
             .build();
 
         header_bar.pack_start(&add_btn);
+        header_bar.pack_start(&quick_btn);
         header_bar.pack_start(&search_toggle);
 
         // End pack buttons
+        let refresh_btn = gtk::Button::builder()
+            .icon_name("view-refresh-symbolic")
+            .tooltip_text("Refresh Reachability (F5)")
+            .build();
+
         let discovery_btn = gtk::Button::builder()
             .icon_name("network-workgroup-symbolic")
-            .tooltip_text("Discover Network Devices")
+            .tooltip_text("Discover Network Devices (Ctrl+D)")
             .build();
 
         let prefs_btn = gtk::Button::builder()
             .icon_name("emblem-system-symbolic")
-            .tooltip_text("Preferences")
+            .tooltip_text("Preferences (Ctrl+,)")
             .build();
 
         let menu_btn = gtk::MenuButton::builder()
@@ -146,6 +199,11 @@ impl MainWindow {
             .build();
 
         let menu = gio::Menu::new();
+        menu.append(Some("Quick Connect..."), Some("app.quick_connect"));
+        menu.append(Some("Import Connections..."), Some("app.import"));
+        menu.append(Some("Export Connections..."), Some("app.export"));
+        menu.append(Some("Refresh Reachability"), Some("app.refresh"));
+        menu.append(Some("Keyboard Shortcuts"), Some("app.shortcuts"));
         menu.append(Some("Preferences"), Some("app.preferences"));
         menu.append(Some("About VER"), Some("app.about"));
         menu.append(Some("Quit"), Some("app.quit"));
@@ -154,6 +212,7 @@ impl MainWindow {
         header_bar.pack_end(&menu_btn);
         header_bar.pack_end(&prefs_btn);
         header_bar.pack_end(&discovery_btn);
+        header_bar.pack_end(&refresh_btn);
 
         // Search bar
         let search_entry = gtk::SearchEntry::builder()
@@ -206,7 +265,7 @@ impl MainWindow {
         let status_page = adw::StatusPage::builder()
             .icon_name("computer-symbolic")
             .title("No Connection Selected")
-            .description("Select a connection from the sidebar or add a new one to get started.")
+            .description("Select a connection from the sidebar or press Ctrl+K for Quick Connect.")
             .child(&status_add_btn)
             .build();
 
@@ -255,50 +314,9 @@ impl MainWindow {
             glib::Propagation::Stop
         });
 
-        // Action: About VER
-        let window_clone = window.clone();
-        let about_action = gio::SimpleAction::new("about", None);
-        about_action.connect_activate(move |_, _| {
-            let about = adw::AboutWindow::builder()
-                .application_name("VER - Very Easy Remote")
-                .developer_name("dawiisss")
-                .version("1.1.0")
-                .comments("GTK4 / Libadwaita Remote Connection Manager in Rust")
-                .license_type(gtk::License::Gpl30)
-                .transient_for(&window_clone)
-                .modal(true)
-                .build();
-            about.present();
-        });
-        app.add_action(&about_action);
-
-        // Action: Preferences
-        let window_for_menu_prefs = window.clone();
-        let state_for_menu_prefs = state.clone();
-        let prefs_action = gio::SimpleAction::new("preferences", None);
-        prefs_action.connect_activate(move |_, _| {
-            let config_rc = Rc::new(RefCell::new(state_for_menu_prefs.borrow().config.clone()));
-            let prefs_dialog =
-                PreferencesWindow::build_window(Some(&window_for_menu_prefs), config_rc.clone());
-            let state_for_close = state_for_menu_prefs.clone();
-            prefs_dialog.connect_close_request(move |_| {
-                state_for_close.borrow_mut().config = config_rc.borrow().clone();
-                gtk::glib::Propagation::Proceed
-            });
-            prefs_dialog.present();
-        });
-        app.add_action(&prefs_action);
-
-        // Action: Quit
-        let app_clone_quit = app.clone();
-        let quit_action = gio::SimpleAction::new("quit", None);
-        quit_action.connect_activate(move |_, _| {
-            app_clone_quit.quit();
-        });
-        app.add_action(&quit_action);
-
-        // Helper to create a ListBoxRow for a connection
-        let create_row = |conn: &Connection| -> gtk::ListBoxRow {
+        // Helper to create a ListBoxRow for a connection with status dot and protocol icon
+        let state_for_row = state.clone();
+        let create_row = move |conn: &Connection| -> gtk::ListBoxRow {
             let row = gtk::ListBoxRow::new();
             row.set_widget_name(&conn.id);
 
@@ -320,8 +338,29 @@ impl MainWindow {
                 .subtitle(subtitle)
                 .build();
 
+            // Prefix container with Status Dot and Protocol Icon
+            let prefix_box = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+            prefix_box.set_valign(gtk::Align::Center);
+
+            let status_dot = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+            status_dot.set_valign(gtk::Align::Center);
+            status_dot.set_widget_name("status_dot");
+
+            let current_status = state_for_row
+                .borrow()
+                .host_statuses
+                .get(&conn.id)
+                .cloned()
+                .unwrap_or(HostStatus::Unknown);
+
+            status_dot.set_css_classes(&["status-dot", current_status.status_css_class()]);
+            status_dot.set_tooltip_text(Some(&current_status.description()));
+
             let icon = gtk::Image::from_icon_name(icon_name);
-            action_row.add_prefix(&icon);
+
+            prefix_box.append(&status_dot);
+            prefix_box.append(&icon);
+            action_row.add_prefix(&prefix_box);
 
             let active_badge = gtk::Label::builder()
                 .label("Active")
@@ -354,89 +393,10 @@ impl MainWindow {
         // Filter Func
         self::setup_filtering(&list_box, &search_entry, state.clone());
 
-        // Callback for Add Connection
-        let add_conn_action = {
-            let state = state.clone();
-            let list_box = list_box.clone();
-            let window_title = window_title.clone();
-            move || {
-                let default_protocol = state.borrow().config.default_protocol;
-                let new_conn = Connection::new_with_protocol(default_protocol);
-                state.borrow_mut().connections.push(new_conn.clone());
-                let _ = storage::save_connections(&state.borrow().connections);
-
-                let row = create_row(&new_conn);
-                list_box.append(&row);
-                list_box.invalidate_filter();
-                list_box.invalidate_sort();
-                list_box.invalidate_headers();
-
-                list_box.select_row(Some(&row));
-                window_title
-                    .set_subtitle(&format!("{} connections", state.borrow().connections.len()));
-            }
-        };
-
-        let add_action_1 = add_conn_action.clone();
-        add_btn.connect_clicked(move |_| add_action_1());
-
-        let add_action_2 = add_conn_action;
-        status_add_btn.connect_clicked(move |_| add_action_2());
-
-        // Preferences Button Action
-        let window_for_prefs = window.clone();
-        let state_for_prefs = state.clone();
-        prefs_btn.connect_clicked(move |_| {
-            let config_rc = Rc::new(RefCell::new(state_for_prefs.borrow().config.clone()));
-            let prefs_dialog =
-                PreferencesWindow::build_window(Some(&window_for_prefs), config_rc.clone());
-
-            // Sync updated config back to window state on close
-            let state_for_close = state_for_prefs.clone();
-            prefs_dialog.connect_close_request(move |_| {
-                state_for_close.borrow_mut().config = config_rc.borrow().clone();
-                gtk::glib::Propagation::Proceed
-            });
-
-            prefs_dialog.present();
-        });
-
-        // Discovery Button Action
-        let window_for_disc = window.clone();
-        let state_for_disc = state.clone();
-        let list_box_for_disc = list_box.clone();
-        let window_title_for_disc = window_title.clone();
-        discovery_btn.connect_clicked(move |_| {
-            let state_inner = state_for_disc.clone();
-            let list_box_inner = list_box_for_disc.clone();
-            let window_title_inner = window_title_for_disc.clone();
-
-            let disc_window = DiscoveryDialog::build_window(
-                Some(&window_for_disc),
-                move |new_conn: Connection| {
-                    state_inner.borrow_mut().connections.push(new_conn.clone());
-                    let _ = storage::save_connections(&state_inner.borrow().connections);
-
-                    let row = create_row(&new_conn);
-                    list_box_inner.append(&row);
-                    list_box_inner.invalidate_filter();
-                    list_box_inner.invalidate_sort();
-                    list_box_inner.invalidate_headers();
-
-                    list_box_inner.select_row(Some(&row));
-                    window_title_inner.set_subtitle(&format!(
-                        "{} connections",
-                        state_inner.borrow().connections.len()
-                    ));
-                },
-            );
-            disc_window.present();
-        });
-
-        // External Session Tracking and Launching
+        // External Session Tracker Container
         enum ExternalSessionEvent {
             Log(String),
-            Exit(bool), // true if success (0), false if error
+            Exit(bool),
         }
 
         let show_external_session = {
@@ -521,7 +481,7 @@ impl MainWindow {
                                 {
                                     let pid = c.id();
                                     unsafe {
-                                        libc::kill(pid as i32, libc::SIGTERM);
+                                        libc::kill(-(pid as i32), libc::SIGTERM);
                                     }
                                 }
 
@@ -535,6 +495,13 @@ impl MainWindow {
                                 }
 
                                 if !exited {
+                                    #[cfg(unix)]
+                                    {
+                                        let pid = c.id();
+                                        unsafe {
+                                            libc::kill(-(pid as i32), libc::SIGKILL);
+                                        }
+                                    }
                                     let _ = c.kill();
                                     let _ = c.wait();
                                 }
@@ -574,7 +541,6 @@ impl MainWindow {
 
                 let stdout_pipe = child.stdout.take();
                 let stderr_pipe = child.stderr.take();
-
                 let child_arc = Arc::new(Mutex::new(Some(child)));
 
                 let active_session = ActiveSession {
@@ -721,6 +687,332 @@ impl MainWindow {
             }
         });
 
+        // Background Batch Reachability Prober
+        let trigger_batch_probe = {
+            let state_for_probe = state.clone();
+            let list_box_for_probe = list_box.clone();
+            Rc::new(move || {
+                let targets: Vec<(String, String, u16)> = {
+                    let st = state_for_probe.borrow();
+                    st.connections
+                        .iter()
+                        .map(|c| (c.id.clone(), c.host.clone(), c.port))
+                        .collect()
+                };
+
+                if targets.is_empty() {
+                    return;
+                }
+
+                // Set all to probing status
+                for (id, _, _) in &targets {
+                    state_for_probe
+                        .borrow_mut()
+                        .host_statuses
+                        .insert(id.clone(), HostStatus::Probing);
+                    set_row_status_dot(&list_box_for_probe, id, &HostStatus::Probing);
+                }
+
+                let state_inner = state_for_probe.clone();
+                let list_box_inner = list_box_for_probe.clone();
+
+                let (tx, rx) = async_channel::unbounded::<(String, HostStatus)>();
+                prober::spawn_batch_probe(targets, Duration::from_millis(2000), 8, tx);
+
+                glib::MainContext::default().spawn_local(async move {
+                    while let Ok((id, status)) = rx.recv().await {
+                        state_inner
+                            .borrow_mut()
+                            .host_statuses
+                            .insert(id.clone(), status.clone());
+                        set_row_status_dot(&list_box_inner, &id, &status);
+                    }
+                });
+            })
+        };
+
+        // Trigger batch probe on startup
+        trigger_batch_probe();
+
+        // Refresh button action
+        let trigger_probe_btn = trigger_batch_probe.clone();
+        refresh_btn.connect_clicked(move |_| {
+            trigger_probe_btn();
+        });
+
+        // Add Connection Action
+        let create_row_for_add = create_row.clone();
+        let add_conn_action = {
+            let state = state.clone();
+            let list_box = list_box.clone();
+            let window_title = window_title.clone();
+            let create_row_inner = create_row_for_add.clone();
+            Rc::new(move || {
+                let default_protocol = state.borrow().config.default_protocol;
+                let new_conn = Connection::new_with_protocol(default_protocol);
+                state.borrow_mut().connections.push(new_conn.clone());
+                let _ = storage::save_connections(&state.borrow().connections);
+
+                let row = create_row_inner(&new_conn);
+                list_box.append(&row);
+                list_box.invalidate_filter();
+                list_box.invalidate_sort();
+                list_box.invalidate_headers();
+
+                list_box.select_row(Some(&row));
+                window_title
+                    .set_subtitle(&format!("{} connections", state.borrow().connections.len()));
+            })
+        };
+
+        let add_action_1 = add_conn_action.clone();
+        add_btn.connect_clicked(move |_| add_action_1());
+
+        let add_action_2 = add_conn_action.clone();
+        status_add_btn.connect_clicked(move |_| add_action_2());
+
+        // Quick Connect Action
+        let window_for_qc = window.clone();
+        let state_for_qc = state.clone();
+        let list_box_for_qc = list_box.clone();
+        let window_title_for_qc = window_title.clone();
+        let launch_session_for_qc = launch_session.clone();
+        let create_row_for_qc = create_row.clone();
+
+        let open_quick_connect = Rc::new(move || {
+            let default_proto = state_for_qc.borrow().config.default_protocol;
+            let launch_connect = launch_session_for_qc.clone();
+            let state_save = state_for_qc.clone();
+            let list_box_save = list_box_for_qc.clone();
+            let window_title_save = window_title_for_qc.clone();
+            let launch_save = launch_session_for_qc.clone();
+            let create_row_save = create_row_for_qc.clone();
+
+            QuickConnectDialog::show(
+                &window_for_qc,
+                default_proto,
+                move |conn, pass| {
+                    launch_connect(conn, pass.unwrap_or_default());
+                },
+                move |conn, pass| {
+                    let pass_str = pass.unwrap_or_default();
+                    if !pass_str.is_empty() {
+                        let _ = secrets::set_password_sync(&conn.id, &pass_str);
+                    }
+                    state_save.borrow_mut().connections.push(conn.clone());
+                    let _ = storage::save_connections(&state_save.borrow().connections);
+
+                    let row = create_row_save(&conn);
+                    list_box_save.append(&row);
+                    list_box_save.invalidate_filter();
+                    list_box_save.invalidate_sort();
+                    list_box_save.invalidate_headers();
+                    list_box_save.select_row(Some(&row));
+                    window_title_save.set_subtitle(&format!(
+                        "{} connections",
+                        state_save.borrow().connections.len()
+                    ));
+
+                    launch_save(conn, pass_str);
+                },
+            );
+        });
+
+        let open_qc_btn = open_quick_connect.clone();
+        quick_btn.connect_clicked(move |_| {
+            open_qc_btn();
+        });
+
+        // Import Action
+        let window_for_import = window.clone();
+        let state_for_import = state.clone();
+        let list_box_for_import = list_box.clone();
+        let window_title_for_import = window_title.clone();
+        let toast_overlay_import = toast_overlay.clone();
+        let create_row_import = create_row.clone();
+        let trigger_probe_import = trigger_batch_probe.clone();
+
+        let open_import_dialog = Rc::new(move || {
+            let state_inner = state_for_import.clone();
+            let list_box_inner = list_box_for_import.clone();
+            let window_title_inner = window_title_for_import.clone();
+            let toast_inner = toast_overlay_import.clone();
+            let create_row_inner = create_row_import.clone();
+            let trigger_probe_inner = trigger_probe_import.clone();
+
+            ImportDialog::show(
+                &window_for_import,
+                move |imported_conns: Vec<Connection>, strategy: ImportConflictStrategy| {
+                    if imported_conns.is_empty() {
+                        return;
+                    }
+
+                    let (added, updated, skipped) = {
+                        let mut st = state_inner.borrow_mut();
+                        merge_imported_connections(&mut st.connections, imported_conns, strategy)
+                    };
+                    let _ = storage::save_connections(&state_inner.borrow().connections);
+
+                    // Rebuild sidebar rows
+                    while let Some(child) = list_box_inner.first_child() {
+                        list_box_inner.remove(&child);
+                    }
+                    for conn in &state_inner.borrow().connections {
+                        let row = create_row_inner(conn);
+                        list_box_inner.append(&row);
+                    }
+                    list_box_inner.invalidate_filter();
+                    list_box_inner.invalidate_sort();
+                    list_box_inner.invalidate_headers();
+
+                    window_title_inner.set_subtitle(&format!(
+                        "{} connections",
+                        state_inner.borrow().connections.len()
+                    ));
+
+                    toast_inner.add_toast(adw::Toast::new(&format!(
+                        "Import finished: {} added, {} updated, {} skipped",
+                        added, updated, skipped
+                    )));
+
+                    trigger_probe_inner();
+                },
+            );
+        });
+
+        // Export Action
+        let window_for_export = window.clone();
+        let state_for_export = state.clone();
+        let open_export_dialog = Rc::new(move || {
+            let st = state_for_export.borrow();
+            let selected_conn = st
+                .selected_id
+                .as_ref()
+                .and_then(|id| st.connections.iter().find(|c| &c.id == id));
+            ExportDialog::show(&window_for_export, &st.connections, selected_conn);
+        });
+
+        // Shortcuts Dialog Action
+        let window_for_shortcuts = window.clone();
+        let open_shortcuts = Rc::new(move || {
+            ShortcutsDialog::show(&window_for_shortcuts);
+        });
+
+        // Preferences Button Action
+        let window_for_prefs = window.clone();
+        let state_for_prefs = state.clone();
+        let open_prefs = Rc::new(move || {
+            let config_rc = Rc::new(RefCell::new(state_for_prefs.borrow().config.clone()));
+            let prefs_dialog =
+                PreferencesWindow::build_window(Some(&window_for_prefs), config_rc.clone());
+
+            let state_for_close = state_for_prefs.clone();
+            prefs_dialog.connect_close_request(move |_| {
+                state_for_close.borrow_mut().config = config_rc.borrow().clone();
+                gtk::glib::Propagation::Proceed
+            });
+
+            prefs_dialog.present();
+        });
+
+        let open_prefs_btn = open_prefs.clone();
+        prefs_btn.connect_clicked(move |_| open_prefs_btn());
+
+        // Discovery Button Action
+        let window_for_disc = window.clone();
+        let state_for_disc = state.clone();
+        let list_box_for_disc = list_box.clone();
+        let window_title_for_disc = window_title.clone();
+        let create_row_disc = create_row.clone();
+        let trigger_probe_disc = trigger_batch_probe.clone();
+
+        let open_discovery = Rc::new(move || {
+            let state_inner = state_for_disc.clone();
+            let list_box_inner = list_box_for_disc.clone();
+            let window_title_inner = window_title_for_disc.clone();
+            let create_row_inner = create_row_disc.clone();
+            let trigger_probe_inner = trigger_probe_disc.clone();
+
+            let disc_window = DiscoveryDialog::build_window(
+                Some(&window_for_disc),
+                move |new_conn: Connection| {
+                    state_inner.borrow_mut().connections.push(new_conn.clone());
+                    let _ = storage::save_connections(&state_inner.borrow().connections);
+
+                    let row = create_row_inner(&new_conn);
+                    list_box_inner.append(&row);
+                    list_box_inner.invalidate_filter();
+                    list_box_inner.invalidate_sort();
+                    list_box_inner.invalidate_headers();
+
+                    list_box_inner.select_row(Some(&row));
+                    window_title_inner.set_subtitle(&format!(
+                        "{} connections",
+                        state_inner.borrow().connections.len()
+                    ));
+                    trigger_probe_inner();
+                },
+            );
+            disc_window.present();
+        });
+
+        let open_disc_btn = open_discovery.clone();
+        discovery_btn.connect_clicked(move |_| open_disc_btn());
+
+        // Register GIO Actions for Menu Items
+        let qc_action = gio::SimpleAction::new("quick_connect", None);
+        let qc_trigger = open_quick_connect.clone();
+        qc_action.connect_activate(move |_, _| qc_trigger());
+        app.add_action(&qc_action);
+
+        let import_action = gio::SimpleAction::new("import", None);
+        let import_trigger = open_import_dialog.clone();
+        import_action.connect_activate(move |_, _| import_trigger());
+        app.add_action(&import_action);
+
+        let export_action = gio::SimpleAction::new("export", None);
+        let export_trigger = open_export_dialog.clone();
+        export_action.connect_activate(move |_, _| export_trigger());
+        app.add_action(&export_action);
+
+        let refresh_action = gio::SimpleAction::new("refresh", None);
+        let refresh_trigger = trigger_batch_probe.clone();
+        refresh_action.connect_activate(move |_, _| refresh_trigger());
+        app.add_action(&refresh_action);
+
+        let shortcuts_action = gio::SimpleAction::new("shortcuts", None);
+        let shortcuts_trigger = open_shortcuts.clone();
+        shortcuts_action.connect_activate(move |_, _| shortcuts_trigger());
+        app.add_action(&shortcuts_action);
+
+        let prefs_action = gio::SimpleAction::new("preferences", None);
+        let prefs_trigger = open_prefs.clone();
+        prefs_action.connect_activate(move |_, _| prefs_trigger());
+        app.add_action(&prefs_action);
+
+        let window_for_about = window.clone();
+        let about_action = gio::SimpleAction::new("about", None);
+        about_action.connect_activate(move |_, _| {
+            let about = adw::AboutWindow::builder()
+                .application_name("VER - Very Easy Remote")
+                .developer_name("dawiisss")
+                .version(env!("CARGO_PKG_VERSION"))
+                .comments("GTK4 / Libadwaita Remote Connection Manager in Rust")
+                .license_type(gtk::License::Gpl30)
+                .transient_for(&window_for_about)
+                .modal(true)
+                .build();
+            about.present();
+        });
+        app.add_action(&about_action);
+
+        let app_clone_quit = app.clone();
+        let quit_action = gio::SimpleAction::new("quit", None);
+        quit_action.connect_activate(move |_, _| {
+            app_clone_quit.quit();
+        });
+        app.add_action(&quit_action);
+
         // Row Selection Callback & Editor View construction
         let state_for_select = state.clone();
         let content_stack_for_select = content_stack.clone();
@@ -728,6 +1020,8 @@ impl MainWindow {
         let list_box_for_select = list_box.clone();
         let launch_session_for_select = launch_session.clone();
         let show_session_for_select = show_external_session.clone();
+        let create_row_for_select = create_row.clone();
+        let toast_overlay_for_select = toast_overlay.clone();
 
         list_box.connect_row_selected(move |_, row_opt| {
             while let Some(child) = editor_container_for_select.first_child() {
@@ -761,7 +1055,6 @@ impl MainWindow {
                     let list_box_on_save = list_box_for_select.clone();
                     let row_on_save = row.clone();
                     let on_save = move |updated_conn: Connection, updated_pass: String| {
-                        // 1. Update connection vector
                         if let Some(c) = state_on_save
                             .borrow_mut()
                             .connections
@@ -772,14 +1065,12 @@ impl MainWindow {
                         }
                         let _ = storage::save_connections(&state_on_save.borrow().connections);
 
-                        // 2. Update password in keyring
                         if updated_pass.is_empty() {
                             let _ = secrets::delete_password_sync(&updated_conn.id);
                         } else {
                             let _ = secrets::set_password_sync(&updated_conn.id, &updated_pass);
                         }
 
-                        // 3. Update list row subtitle/title
                         if let Some(child) = row_on_save.child() {
                             if let Ok(action_row) = child.downcast::<adw::ActionRow>() {
                                 action_row.set_title(&updated_conn.name);
@@ -804,6 +1095,7 @@ impl MainWindow {
                     let state_on_dup = state_for_select.clone();
                     let list_box_on_dup = list_box_for_select.clone();
                     let window_title_on_dup = window_title.clone();
+                    let create_row_on_dup = create_row_for_select.clone();
                     let on_duplicate = move |dup_conn: Connection, dup_pass: String| {
                         state_on_dup.borrow_mut().connections.push(dup_conn.clone());
                         let _ = storage::save_connections(&state_on_dup.borrow().connections);
@@ -812,7 +1104,7 @@ impl MainWindow {
                             let _ = secrets::set_password_sync(&dup_conn.id, &dup_pass);
                         }
 
-                        let new_row = create_row(&dup_conn);
+                        let new_row = create_row_on_dup(&dup_conn);
                         list_box_on_dup.append(&new_row);
                         list_box_on_dup.invalidate_filter();
                         list_box_on_dup.invalidate_sort();
@@ -845,8 +1137,64 @@ impl MainWindow {
                         ));
                     };
 
+                    // Context-Aware Wake-on-LAN with Automated Polling
+                    let state_on_wake = state_for_select.clone();
+                    let list_box_on_wake = list_box_for_select.clone();
+                    let toast_on_wake = toast_overlay_for_select.clone();
+                    let conn_for_wake = conn.clone();
+
                     let on_wake = move |mac: String| {
                         let _ = network::send_wol(&mac);
+                        let target_host = conn_for_wake.host.clone();
+                        let target_port = conn_for_wake.port;
+                        let target_id = conn_for_wake.id.clone();
+                        let target_name = conn_for_wake.name.clone();
+
+                        let state_poll = state_on_wake.clone();
+                        let list_box_poll = list_box_on_wake.clone();
+                        let toast_poll = toast_on_wake.clone();
+
+                        // Set probing status immediately
+                        state_poll
+                            .borrow_mut()
+                            .host_statuses
+                            .insert(target_id.clone(), HostStatus::Probing);
+                        set_row_status_dot(&list_box_poll, &target_id, &HostStatus::Probing);
+
+                        // Spawn polling task: probe every 2 seconds for up to 30 seconds
+                        glib::MainContext::default().spawn_local(async move {
+                            for _ in 0..15 {
+                                glib::timeout_future(Duration::from_millis(2000)).await;
+                                let status = prober::probe_host_async(
+                                    target_host.clone(),
+                                    target_port,
+                                    Duration::from_millis(1500),
+                                )
+                                .await;
+
+                                if status.is_online() {
+                                    state_poll
+                                        .borrow_mut()
+                                        .host_statuses
+                                        .insert(target_id.clone(), status.clone());
+                                    set_row_status_dot(&list_box_poll, &target_id, &status);
+                                    toast_poll.add_toast(adw::Toast::new(&format!(
+                                        "Host '{}' is now online!",
+                                        target_name
+                                    )));
+                                    return;
+                                }
+                            }
+
+                            let final_status = HostStatus::Offline {
+                                reason: "Host did not wake up within 30s".to_string(),
+                            };
+                            state_poll
+                                .borrow_mut()
+                                .host_statuses
+                                .insert(target_id.clone(), final_status.clone());
+                            set_row_status_dot(&list_box_poll, &target_id, &final_status);
+                        });
                     };
 
                     let editor_widget = ConnectionEditor::build_widget(
@@ -886,6 +1234,110 @@ impl MainWindow {
                 content_stack_for_select.set_visible_child_name("welcome");
             }
         });
+
+        // Global Keyboard Event Controller (Accelerators)
+        let key_controller = gtk::EventControllerKey::new();
+        let add_conn_key = add_conn_action.clone();
+        let quick_connect_key = open_quick_connect.clone();
+        let import_key = open_import_dialog.clone();
+        let export_key = open_export_dialog.clone();
+        let shortcuts_key = open_shortcuts.clone();
+        let prefs_key = open_prefs.clone();
+        let disc_key = open_discovery.clone();
+        let probe_key = trigger_batch_probe.clone();
+        let search_toggle_key = search_toggle.clone();
+        let search_entry_key = search_entry.clone();
+        let state_key = state.clone();
+        let list_box_key = list_box.clone();
+        let launch_session_key = launch_session.clone();
+        let app_key = app.clone();
+
+        key_controller.connect_key_pressed(move |_, keyval, _keycode, state_flags| {
+            let ctrl = state_flags.contains(gdk::ModifierType::CONTROL_MASK);
+
+            if ctrl {
+                match keyval {
+                    gdk::Key::k | gdk::Key::K => {
+                        quick_connect_key();
+                        return glib::Propagation::Stop;
+                    }
+                    gdk::Key::n | gdk::Key::N => {
+                        add_conn_key();
+                        return glib::Propagation::Stop;
+                    }
+                    gdk::Key::f | gdk::Key::F => {
+                        let active = !search_toggle_key.is_active();
+                        search_toggle_key.set_active(active);
+                        if active {
+                            search_entry_key.grab_focus();
+                        }
+                        return glib::Propagation::Stop;
+                    }
+                    gdk::Key::i | gdk::Key::I => {
+                        import_key();
+                        return glib::Propagation::Stop;
+                    }
+                    gdk::Key::e | gdk::Key::E => {
+                        export_key();
+                        return glib::Propagation::Stop;
+                    }
+                    gdk::Key::d | gdk::Key::D => {
+                        disc_key();
+                        return glib::Propagation::Stop;
+                    }
+                    gdk::Key::comma => {
+                        prefs_key();
+                        return glib::Propagation::Stop;
+                    }
+                    gdk::Key::question | gdk::Key::slash => {
+                        shortcuts_key();
+                        return glib::Propagation::Stop;
+                    }
+                    gdk::Key::r | gdk::Key::R => {
+                        probe_key();
+                        return glib::Propagation::Stop;
+                    }
+                    gdk::Key::q | gdk::Key::Q => {
+                        app_key.quit();
+                        return glib::Propagation::Stop;
+                    }
+                    _ => {}
+                }
+            } else {
+                match keyval {
+                    gdk::Key::F5 => {
+                        probe_key();
+                        return glib::Propagation::Stop;
+                    }
+                    gdk::Key::F1 => {
+                        shortcuts_key();
+                        return glib::Propagation::Stop;
+                    }
+                    gdk::Key::Return => {
+                        if let Some(sel_row) = list_box_key.selected_row() {
+                            let id = sel_row.widget_name().to_string();
+                            let conn_opt = state_key
+                                .borrow()
+                                .connections
+                                .iter()
+                                .find(|c| c.id == id)
+                                .cloned();
+                            if let Some(conn) = conn_opt {
+                                let pass = secrets::get_password_sync(&conn.id)
+                                    .unwrap_or(None)
+                                    .unwrap_or_default();
+                                launch_session_key(conn, pass);
+                                return glib::Propagation::Stop;
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+
+            glib::Propagation::Proceed
+        });
+        window.add_controller(key_controller);
 
         // Auto-connect Last Session on startup
         let auto_connect_target = {
@@ -1041,6 +1493,43 @@ fn set_row_active_badge(list_box: &gtk::ListBox, conn_id: &str, is_active: bool)
                 let mut next_w = row.first_child();
                 while let Some(w) = next_w {
                     if find_and_set_badge(&w, is_active) {
+                        return;
+                    }
+                    next_w = w.next_sibling();
+                }
+                break;
+            }
+        }
+        child_opt = child.next_sibling();
+    }
+}
+
+fn find_and_set_status_dot(widget: &gtk::Widget, status: &HostStatus) -> bool {
+    if widget.widget_name() == "status_dot" {
+        if let Ok(b) = widget.clone().downcast::<gtk::Box>() {
+            b.set_css_classes(&["status-dot", status.status_css_class()]);
+            b.set_tooltip_text(Some(&status.description()));
+            return true;
+        }
+    }
+    let mut child = widget.first_child();
+    while let Some(c) = child {
+        if find_and_set_status_dot(&c, status) {
+            return true;
+        }
+        child = c.next_sibling();
+    }
+    false
+}
+
+fn set_row_status_dot(list_box: &gtk::ListBox, conn_id: &str, status: &HostStatus) {
+    let mut child_opt = list_box.first_child();
+    while let Some(child) = child_opt {
+        if let Ok(row) = child.clone().downcast::<gtk::ListBoxRow>() {
+            if row.widget_name() == conn_id {
+                let mut next_w = row.first_child();
+                while let Some(w) = next_w {
+                    if find_and_set_status_dot(&w, status) {
                         return;
                     }
                     next_w = w.next_sibling();

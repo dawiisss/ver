@@ -231,6 +231,8 @@ pub struct AdvancedSettings {
     pub rdp_desktop_composition: bool,
     #[serde(default)]
     pub rdp_hw_accel: bool,
+    #[serde(default)]
+    pub ssh_identity_file: String,
 }
 fn default_true() -> bool {
     true
@@ -273,6 +275,7 @@ impl Default for AdvancedSettings {
             rdp_smooth_fonts: true,
             rdp_desktop_composition: true,
             rdp_hw_accel: false,
+            ssh_identity_file: String::new(),
         }
     }
 }
@@ -688,5 +691,26 @@ mod tests {
 
         conn.mac_address = "invalid-mac".to_string();
         assert!(conn.validate_mac().is_err());
+    }
+
+    #[test]
+    fn test_ssh_identity_file_serde() {
+        let conn = Connection {
+            protocol: Protocol::Ssh,
+            advanced_settings: AdvancedSettings {
+                ssh_identity_file: "/home/user/.ssh/id_ed25519".to_string(),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        let json = serde_json::to_string(&conn).expect("Serialization failed");
+        assert!(json.contains("/home/user/.ssh/id_ed25519"));
+
+        let deserialized: Connection = serde_json::from_str(&json).expect("Deserialization failed");
+        assert_eq!(
+            deserialized.advanced_settings.ssh_identity_file,
+            "/home/user/.ssh/id_ed25519"
+        );
     }
 }

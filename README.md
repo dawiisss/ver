@@ -70,3 +70,7 @@ cargo build --release
 ```
 The resulting executable will be in `target/release/ver`.
 
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md) for a detailed record of all changes, security enhancements, and version releases.
+

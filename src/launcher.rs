@@ -299,11 +299,20 @@ pub fn launch_rdp(conn: &Connection, password: Option<&str>) -> Result<Child, St
         return Err("Connection host cannot be empty".to_string());
     }
 
-    let args = build_rdp_args(conn, password);
+    let mut args = build_rdp_args(conn, None);
+    let has_password = password.map(|p| !p.is_empty()).unwrap_or(false);
+    if has_password {
+        args.push("/from-stdin:force".to_string());
+    }
+
     let mut cmd = Command::new("xfreerdp3");
 
     cmd.args(&args)
-        .stdin(Stdio::null())
+        .stdin(if has_password {
+            Stdio::piped()
+        } else {
+            Stdio::null()
+        })
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
 
@@ -313,8 +322,18 @@ pub fn launch_rdp(conn: &Connection, password: Option<&str>) -> Result<Child, St
         cmd.process_group(0);
     }
 
-    cmd.spawn()
-        .map_err(|e| format!("Failed to spawn xfreerdp3 process: {}", e))
+    let mut child = cmd
+        .spawn()
+        .map_err(|e| format!("Failed to spawn xfreerdp3 process: {}", e))?;
+
+    if let Some(pass) = password.filter(|p| !p.is_empty()) {
+        if let Some(mut stdin) = child.stdin.take() {
+            use std::io::Write;
+            let _ = writeln!(stdin, "{}", pass);
+        }
+    }
+
+    Ok(child)
 }
 
 /// Launches an SSH session in an available terminal emulator with an optional SSH identity key file.
@@ -340,7 +359,12 @@ pub fn launch_ssh_with_identity(
 
 /// Launches an SSH session in an available terminal emulator.
 pub fn launch_ssh(conn: &Connection) -> Result<Child, String> {
-    launch_ssh_with_identity(conn, None)
+    let identity = if conn.advanced_settings.ssh_identity_file.trim().is_empty() {
+        None
+    } else {
+        Some(conn.advanced_settings.ssh_identity_file.as_str())
+    };
+    launch_ssh_with_identity(conn, identity)
 }
 
 /// Build command-line argument list for `remote-viewer` based on connection parameters.
