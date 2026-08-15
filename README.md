@@ -133,6 +133,21 @@ cargo clippy --all-targets --all-features -- -D warnings
 
 ---
 
+## 🙏 Acknowledgments
+
+VER is built on the shoulders of remarkable open-source projects and communities:
+
+* **[FreeRDP](https://www.freerdp.com/)**: For the industry-standard `xfreerdp3` client providing RDP/XRDP protocol support.
+* **[TigerVNC](https://tigervnc.org/)**: For high-performance, secure VNC remote desktop client tooling.
+* **[SPICE Project](https://www.spice-space.org/)**: For low-latency VM and hypervisor streaming via `remote-viewer`.
+* **[OpenSSH](https://www.openssh.com/)**: For the gold standard in secure remote shell connectivity.
+* **[GNOME](https://www.gnome.org/) & [Libadwaita](https://gnome.pages.gitlab.gnome.org/libadwaita/)**: For modern, accessible Linux desktop design systems and HIG.
+* **[gtk-rs](https://gtk-rs.org/)**: For first-class, memory-safe Rust bindings to GTK 4 and Libadwaita.
+* **[oo7](https://github.com/bilelmoussaoui/oo7)**: For native Freedesktop Secret Service keyring integration in pure Rust.
+* **[Remmina](https://remmina.org/)**: For inspiring Linux remote management workflows.
+
+---
+
 ## 📄 License & Changelog
 
 * **License**: Distributed under the [MIT License](LICENSE).
