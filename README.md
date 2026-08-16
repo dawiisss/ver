@@ -70,12 +70,83 @@ VER features comprehensive keyboard accelerators adhering to GNOME HIG standards
 
 ## 📦 Installation & Packaging
 
+### ⚡ Quick Install (GitHub Releases)
+
+The easiest way to install VER on any Linux distribution is via the automated installer, which fetches the latest release bundle from GitHub and configures desktop integration (launchers, icons, PATH):
+
+#### User Installation (No root / sudo required):
+```bash
+# Using curl
+curl -fsSL https://raw.githubusercontent.com/dawiisss/ver/main/install.sh | bash
+
+# Or using wget
+wget -qO- https://raw.githubusercontent.com/dawiisss/ver/main/install.sh | bash
+```
+Installs the binary to `~/.local/bin/ver` and desktop launchers to `~/.local/share/applications/`.
+
+#### System-wide Installation:
+```bash
+curl -fsSL https://raw.githubusercontent.com/dawiisss/ver/main/install.sh | sudo bash -s -- --system
+```
+Installs the binary to `/usr/local/bin/ver` and desktop launchers to `/usr/local/share/applications/`.
+
+#### Install Options & Version Pinning:
+```bash
+# Install a specific release version
+curl -fsSL https://raw.githubusercontent.com/dawiisss/ver/main/install.sh | bash -s -- --version v1.3.0
+
+# Install to a custom prefix directory
+./install.sh --prefix /opt/ver
+
+# Install from a local build (target/release/ver)
+./install.sh --local
+
+# Preview actions without making changes
+./install.sh --dry-run
+```
+
+---
+
+### 🗑️ Uninstallation
+
+To remove VER and its desktop launchers, run the uninstallation script:
+
+```bash
+# Using curl
+curl -fsSL https://raw.githubusercontent.com/dawiisss/ver/main/uninstall.sh | bash
+
+# Or from local repository clone
+./uninstall.sh
+
+# Remove application and also purge configuration / connection data (~/.config/ver)
+./uninstall.sh --purge
+
+# Remove system-wide installation
+sudo ./uninstall.sh --system
+```
+
+---
+
 ### Runtime Dependencies
 Ensure the backend tools for your required protocols are installed:
 * **RDP / XRDP**: `freerdp3` or `freerdp3-x11` (provides `xfreerdp3`)
 * **VNC**: `tigervnc` (provides `vncviewer`)
 * **SPICE**: `virt-viewer` (provides `remote-viewer`)
 * **SSH**: Any desktop terminal emulator (`ptyxis`, `gnome-terminal`, `konsole`, `alacritty`, etc.)
+
+---
+
+### Distribution Packages
+
+You can download pre-built packages from [GitHub Releases](https://github.com/dawiisss/ver/releases/latest) or build native packages using helper scripts:
+```bash
+./build_deb.sh        # Generates Debian / Ubuntu .deb package
+./build_pacman.sh     # Generates Arch Linux pacman .pkg.tar.zst package
+./build_rpm.sh        # Generates RedHat / Fedora .rpm package
+./build_appimage.sh   # Generates standalone x86_64 AppImage
+```
+
+---
 
 ### Build from Source
 
@@ -105,17 +176,8 @@ cargo run
 # Build optimized release binary
 cargo build --release
 ```
-The compiled binary will be available at `target/release/ver`.
+The compiled binary will be available at `target/release/ver`. You can install it locally using `./install.sh --local`.
 
-### Distribution Packages
-
-Helper scripts are available to generate native Linux distribution packages:
-```bash
-./build_deb.sh        # Generates Debian / Ubuntu .deb package
-./build_pacman.sh     # Generates Arch Linux pacman .pkg.tar.zst package
-./build_rpm.sh        # Generates RedHat / Fedora .rpm package
-./build_appimage.sh   # Generates standalone x86_64 AppImage
-```
 
 ---
 

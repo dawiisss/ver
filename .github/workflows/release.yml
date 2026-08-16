@@ -51,6 +51,7 @@ jobs:
           cp target/release/ver staging/ver
           cp data/com.example.ver.desktop staging/
           cp data/com.example.ver.png staging/
+          cp data/com.example.ver.svg staging/
           tar -czvf ver-linux-x86_64-${{ github.ref_name }}.tar.gz -C staging .
 
       - name: Create GitHub Release and Upload Artifacts
