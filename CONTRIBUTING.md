@@ -1,6 +1,6 @@
 # Contributing to VER
 
-Thank you for your interest in contributing to **VER (Very Easy Remote)**! We welcome contributions from everyone, whether it's reporting a bug, improving documentation, suggesting features, or submitting code changes.
+Thank you for your interest in contributing to **VER (Very Easy Remote Manager)**! We welcome contributions from everyone, whether it's reporting a bug, improving documentation, suggesting features, or submitting code changes.
 
 ---
 

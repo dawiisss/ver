@@ -994,7 +994,7 @@ impl MainWindow {
         let about_action = gio::SimpleAction::new("about", None);
         about_action.connect_activate(move |_, _| {
             let about = adw::AboutWindow::builder()
-                .application_name("VER - Very Easy Remote")
+                .application_name("VER - Very Easy Remote Manager")
                 .developer_name("dawiisss")
                 .version(env!("CARGO_PKG_VERSION"))
                 .comments("GTK4 / Libadwaita Remote Connection Manager in Rust")

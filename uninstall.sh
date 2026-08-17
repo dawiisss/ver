@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# VER (Very Easy Remote) - Uninstallation Script
+# VER (Very Easy Remote Manager) - Uninstallation Script
 # https://github.com/dawiisss/ver
 #
 # Usage:
@@ -60,7 +60,7 @@ abort() {
 # --- Help Text ---
 show_help() {
     cat << EOF
-${COLOR_BOLD}VER (Very Easy Remote) Uninstaller${COLOR_RESET}
+${COLOR_BOLD}VER (Very Easy Remote Manager) Uninstaller${COLOR_RESET}
 
 ${COLOR_BOLD}USAGE:${COLOR_RESET}
     ./uninstall.sh [OPTIONS]

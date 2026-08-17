@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# VER (Very Easy Remote) - Installation Script
+# VER (Very Easy Remote Manager) - Installation Script
 # https://github.com/dawiisss/ver
 #
 # Usage:
@@ -63,7 +63,7 @@ abort() {
 # --- Help Text ---
 show_help() {
     cat << EOF
-${COLOR_BOLD}VER (Very Easy Remote) Installer${COLOR_RESET}
+${COLOR_BOLD}VER (Very Easy Remote Manager) Installer${COLOR_RESET}
 
 ${COLOR_BOLD}USAGE:${COLOR_RESET}
     ./install.sh [OPTIONS]
@@ -474,7 +474,7 @@ do_install() {
     done
 
     printf "\n"
-    success "${COLOR_BOLD}VER (Very Easy Remote) successfully installed!${COLOR_RESET}"
+    success "${COLOR_BOLD}VER (Very Easy Remote Manager) successfully installed!${COLOR_RESET}"
     printf "\n"
     printf "  ${COLOR_BOLD}Installed Binary:${COLOR_RESET}   %s\n" "${BIN_DIR}/${APP_NAME}"
     printf "  ${COLOR_BOLD}Desktop Launcher:${COLOR_RESET}   %s\n" "${APPS_DIR}/${DESKTOP_ID}.desktop"

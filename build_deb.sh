@@ -29,7 +29,7 @@ Priority: optional
 Architecture: amd64
 Maintainer: VER Team
 Depends: libgtk-4-1, libadwaita-1-0
-Description: Very Easy Remote - A GTK4 Connection Manager
+Description: Very Easy Remote Manager - A GTK4 Connection Manager
 CTRL_EOF
 
 dpkg-deb --build "$PACKAGE_NAME" "${PACKAGE_NAME}.deb"

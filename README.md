@@ -1,49 +1,59 @@
-# VER - Very Easy Remote
+# VER - Very Easy Remote Manager
 
-[![Rust](https://img.shields.io/badge/Rust-1.75+-orange.svg)](https://www.rust-lang.org)
-[![GTK4](https://img.shields.io/badge/GTK-4.0-blue.svg)](https://www.gtk.org)
-[![Libadwaita](https://img.shields.io/badge/Libadwaita-1.4+-purple.svg)](https://gnome.pages.gitlab.gnome.org/libadwaita/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Rust](https://img.shields.io/badge/Rust-1.75+-orange.svg?style=flat-square&logo=rust)](https://www.rust-lang.org)
+[![GTK4](https://img.shields.io/badge/GTK-4.0-blue.svg?style=flat-square&logo=gtk)](https://www.gtk.org)
+[![Libadwaita](https://img.shields.io/badge/Libadwaita-1.4+-purple.svg?style=flat-square&logo=gnome)](https://gnome.pages.gitlab.gnome.org/libadwaita/)
+[![Release](https://img.shields.io/github/v/release/dawiisss/ver?style=flat-square&color=success)](https://github.com/dawiisss/ver/releases/latest)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square)](https://opensource.org/licenses/MIT)
 
-**VER (Very Easy Remote)** is a modern, native Linux Remote Connection Manager built from the ground up in **Rust**, **GTK4**, and **Libadwaita**. It provides a fast, secure, and intuitive interface for managing and connecting to remote infrastructure via RDP, XRDP, VNC, SSH, and SPICE.
+**VER (Very Easy Remote Manager)** is a modern, native Linux Remote Connection Manager built from the ground up in **Rust**, **GTK4**, and **Libadwaita**. It provides a blazing-fast, secure, and intuitive interface for organizing, discovering, and connecting to remote infrastructure via **RDP**, **XRDP**, **VNC**, **SSH**, and **SPICE**.
 
 ---
 
 ## 🌟 Key Features
 
 ### ⚡ Quick Connect (<kbd>Ctrl+K</kbd>)
-* **Universal URI & Shorthand Parsing**: Connect instantly using URIs (`ssh://user@host:port`, `rdp://admin@server`, `vnc://10.0.0.5:5901`, `spice://hypervisor:5900`) or shorthands (`user@host:2222`, `host:3389`, IPv6 `[fe80::1]:22`).
-* **Live Autocomplete**: Protocol, host, port, and credentials auto-populate dynamically as you type.
-* **Dual Execution Modes**: Launch immediately for one-off ad-hoc sessions ("Connect") or persist to your library ("Save & Connect").
+* **Universal URI & Shorthand Parsing**: Connect instantly using URIs (`ssh://user@host:port`, `rdp://admin@server`, `vnc://10.0.0.5:5901`, `spice://hypervisor:5900`) or intuitive shorthands (`user@host:2222`, `host:3389`, IPv6 `[fe80::1]:22`).
+* **Live Autocomplete**: Dynamic, real-time extraction and field population for protocols, hosts, ports, and usernames as you type.
+* **Dual Execution Modes**: Launch immediately for one-off ad-hoc sessions ("Connect") or persist directly to your connection library ("Save & Connect").
 
 ### 🟢 Live Host Reachability Prober & Smart Wake-on-LAN
 * **Non-Blocking Reachability Status**: Asynchronous background TCP probing displays real-time connection status in the sidebar:
-  * 🟢 **Online**: Tooltip displays roundtrip latency in milliseconds (e.g. `Online (12 ms)`).
-  * 🔴 **Offline**: Tooltip shows specific failure reasons (e.g. `Connection refused`, `Connection timed out`).
+  * 🟢 **Online**: Live host reachable with latency tooltip (e.g. `Online (12 ms)`).
+  * 🔴 **Offline**: Host unreachable with specific failure reason (e.g. `Connection refused`, `Connection timed out`).
   * 🟡 **Probing**: Live verification in progress.
   * ⚪ **Unknown**: Pending initial probe.
-* **Integrated Wake-on-LAN (WoL)**: Send magic packets directly from the Connection Editor.
+* **Integrated Wake-on-LAN (WoL)**: Send magic packets directly from the Connection Editor with support for standard, hyphenated, Cisco dot, and raw MAC formats.
 * **Automated Post-WoL Polling**: Initiates a 30-second background polling cycle, automatically transitioning the status dot to 🟢 Online and triggering a desktop toast notification as soon as the target machine responds.
 
-### 🔄 Import & Export Ecosystem
+### 🔄 Import & Export Ecosystem (<kbd>Ctrl+I</kbd> / <kbd>Ctrl+E</kbd>)
 * **Remmina Migration**: Auto-scan `~/.local/share/remmina/*.remmina` profiles or import individual files with automatic extraction of display depths, audio redirection, multimon, and SSH keys.
 * **OpenSSH `~/.ssh/config`**: Auto-detects and imports host blocks, hostnames, usernames, custom ports, and expanded identity files (`~/.ssh/id_*`).
 * **Microsoft `.rdp` Support**: Seamless import and export of standard Windows Remote Desktop `.rdp` configuration files.
-* **JSON Backups**: Full encrypted-password-safe JSON library backups with schema version metadata.
+* **JSON Backups**: Full encrypted-password-safe JSON library backups with schema versioning and timestamp metadata.
 * **Selective Export (<kbd>Ctrl+E</kbd>)**: Granular multi-selection checklist with "Select All" / "Deselect All", dynamic counter, and smart focus pre-selection.
 * **Conflict Resolution**: Choose between *Skip Duplicates*, *Overwrite Existing*, or *Keep Both (Rename with Suffix)* when importing.
+
+### 🔍 Local Network & Service Discovery (<kbd>Ctrl+D</kbd>)
+* **Subnet Scanning**: Automatically probes your local network interfaces and subnets for active RDP (3389), VNC (5900), and SSH (22) services.
+* **One-Click Import**: Quickly add discovered network machines directly into your connection inventory.
 
 ### 🖥️ Multi-Protocol Support
 * **RDP & XRDP**: Powered by `xfreerdp3` with support for dynamic resolution, multimon, audio redirection, clipboard sharing, gateway servers, shared folders, security protocol negotiation (NLA, TLS, RDP, ExtNLA), and certificate verification policies (TOFU, Strict Deny, Ignore).
 * **VNC**: Seamless integration with `vncviewer` with automated credential passing and color level selection.
-* **SPICE**: High-performance hypervisor connections via `remote-viewer`.
-* **SSH**: Direct launch into your favorite desktop terminal emulator (`ptyxis`, `kgx`, `gnome-terminal`, `konsole`, `alacritty`, `foot`, `wezterm`, `xterm`) with custom private key identity paths.
+* **SPICE**: High-performance hypervisor and VM streaming via `remote-viewer`.
+* **SSH**: Direct launch into your favorite desktop terminal emulator (`ptyxis`, `kgx`, `gnome-terminal`, `konsole`, `alacritty`, `foot`, `wezterm`, `xterm`) with custom private key identity paths (`-i`).
 
 ### 🔒 Enterprise-Grade Security
 * **RDP Stdin Credential Hardening**: Passwords are piped over standard input via `xfreerdp3 /from-stdin:force`, eliminating credential exposure in `/proc/<pid>/cmdline` and process monitoring utilities (`ps`, `top`).
 * **Secret Service Keyring Integration**: Securely store connection passwords in your native system keyring (`gnome-keyring`, `kwallet`, `keepassxc`) via the Freedesktop Secret Service API (`oo7`).
-* **Configuration Hardening**: Enforced `0700` Unix directory permissions on all user configuration paths.
+* **Configuration Hardening**: Strict `0700` Unix directory permissions on all user configuration paths (`~/.config/ver`).
 * **Clean Process Group Signaling**: Process group signal termination (`-(pid as i32)`) ensures child shells, SSH sessions, and terminal wrappers exit cleanly without orphaned processes.
+
+### 🔔 Active Session Tracking & System Tray
+* **Live Session Badges**: Real-time "Active" sidebar indicators showing currently connected sessions.
+* **Session Logs**: Embedded log view streaming live process output and connection events.
+* **System Tray Indicator**: Background StatusNotifierItem tray icon for quick window toggle and persistent daemon mode.
 
 ---
 
@@ -127,18 +137,23 @@ sudo ./uninstall.sh --system
 
 ---
 
-### Runtime Dependencies
-Ensure the backend tools for your required protocols are installed:
-* **RDP / XRDP**: `freerdp3` or `freerdp3-x11` (provides `xfreerdp3`)
-* **VNC**: `tigervnc` (provides `vncviewer`)
-* **SPICE**: `virt-viewer` (provides `remote-viewer`)
-* **SSH**: Any desktop terminal emulator (`ptyxis`, `gnome-terminal`, `konsole`, `alacritty`, etc.)
+### ⚙️ Runtime Dependencies
+
+Ensure the backend tools for your required protocols are installed on your system:
+
+| Protocol | Backend Package / Binary | Example Package Names |
+| :--- | :--- | :--- |
+| **RDP / XRDP** | `xfreerdp3` | `freerdp3`, `freerdp3-x11` |
+| **VNC** | `vncviewer` | `tigervnc`, `tigervnc-viewer` |
+| **SPICE** | `remote-viewer` | `virt-viewer` |
+| **SSH** | Native Terminal Emulator | `ptyxis`, `gnome-terminal`, `konsole`, `alacritty`, `foot`, `wezterm`, `xterm` |
 
 ---
 
-### Distribution Packages
+### 📦 Distribution Packages
 
-You can download pre-built packages from [GitHub Releases](https://github.com/dawiisss/ver/releases/latest) or build native packages using helper scripts:
+You can download pre-built packages from [GitHub Releases](https://github.com/dawiisss/ver/releases/latest) or build native packages locally:
+
 ```bash
 ./build_deb.sh        # Generates Debian / Ubuntu .deb package
 ./build_pacman.sh     # Generates Arch Linux pacman .pkg.tar.zst package
@@ -148,7 +163,7 @@ You can download pre-built packages from [GitHub Releases](https://github.com/da
 
 ---
 
-### Build from Source
+### 🛠️ Build from Source
 
 #### 1. Install Build Dependencies
 
@@ -176,8 +191,7 @@ cargo run
 # Build optimized release binary
 cargo build --release
 ```
-The compiled binary will be available at `target/release/ver`. You can install it locally using `./install.sh --local`.
-
+The compiled binary will be located at `target/release/ver`. You can install it locally using `./install.sh --local`.
 
 ---
 
@@ -214,3 +228,4 @@ VER is built on the shoulders of remarkable open-source projects and communities
 
 * **License**: Distributed under the [MIT License](LICENSE).
 * **Changelog**: See [CHANGELOG.md](CHANGELOG.md) for detailed version history and release notes.
+

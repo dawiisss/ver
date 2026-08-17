@@ -1,8 +1,8 @@
 # Support
 
-## Getting Help with VER
+## Getting Support for VER
 
-Thank you for using **VER (Very Easy Remote)**! Here are the best ways to get help and support:
+Thank you for using **VER (Very Easy Remote Manager)**! Here are the best ways to get help and support:
 
 ---
 

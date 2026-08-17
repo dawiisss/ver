@@ -28,7 +28,7 @@ cat << EOF > "$PKG_DIR/.PKGINFO"
 pkgname = ver
 pkgbase = ver
 pkgver = ${VERSION}-1
-pkgdesc = Very Easy Remote - A GTK4 Connection Manager
+pkgdesc = Very Easy Remote Manager - A GTK4 Connection Manager
 url = https://github.com/dawiisss/ver
 builddate = $BUILD_DATE
 packager = VER Team
