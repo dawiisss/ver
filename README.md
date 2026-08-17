@@ -10,7 +10,7 @@
 
 ---
 
-## ⚡ Quick Install
+## Quick Install
 
 Install the latest release of VER on any Linux distribution with a single command (no root required):
 
@@ -23,42 +23,43 @@ wget -qO- https://raw.githubusercontent.com/dawiisss/ver/main/install.sh | bash
 ```
 
 > Installs the standalone binary to `~/.local/bin/ver` and registers desktop menu launchers and icons.  
-> For system-wide installation, distro packages, or building from source, see [Installation & Packaging](#-installation--packaging).
+> For system-wide installation, distro packages, or building from source, see [Installation & Packaging](#installation--packaging).
 
 ---
 
-## 📑 Table of Contents
+## Table of Contents
 
-- [⚡ Quick Install](#-quick-install)
-- [🌟 Key Features](#-key-features)
-  - [⚡ Quick Connect (<kbd>Ctrl+K</kbd>)](#-quick-connect-ctrlk)
-  - [🟢 Live Host Reachability Prober & Smart Wake-on-LAN](#-live-host-reachability-prober--smart-wake-on-lan)
-  - [🔄 Import & Export Ecosystem (<kbd>Ctrl+I</kbd> / <kbd>Ctrl+E</kbd>)](#-import--export-ecosystem-ctrli--ctrle)
-  - [🔍 Local Network & Service Discovery (<kbd>Ctrl+D</kbd>)](#-local-network--service-discovery-ctrld)
-  - [🖥️ Multi-Protocol Support](#️-multi-protocol-support)
-  - [🔒 Enterprise-Grade Security](#-enterprise-grade-security)
-  - [🔔 Active Session Tracking & System Tray](#-active-session-tracking--system-tray)
-- [⌨️ Global Keyboard Shortcuts](#️-global-keyboard-shortcuts)
-- [📦 Installation & Packaging](#-installation--packaging)
+- [Quick Install](#quick-install)
+- [Key Features](#key-features)
+  - [Quick Connect (<kbd>Ctrl+K</kbd>)](#quick-connect-ctrlk)
+  - [Host Reachability Prober & Smart Wake-on-LAN](#host-reachability-prober--smart-wake-on-lan)
+  - [Import & Export Ecosystem (<kbd>Ctrl+I</kbd> / <kbd>Ctrl+E</kbd>)](#import--export-ecosystem-ctrli--ctrle)
+  - [Local Network & Service Discovery (<kbd>Ctrl+D</kbd>)](#local-network--service-discovery-ctrld)
+  - [Multi-Protocol Support](#multi-protocol-support)
+  - [Enterprise-Grade Security](#enterprise-grade-security)
+  - [Active Session Tracking & System Tray](#active-session-tracking--system-tray)
+- [Global Keyboard Shortcuts](#global-keyboard-shortcuts)
+- [Installation & Packaging](#installation--packaging)
+  - [Automated Installation](#automated-installation)
   - [Install Options & Version Pinning](#install-options--version-pinning)
-  - [🗑️ Uninstallation](#️-uninstallation)
-  - [⚙️ Runtime Dependencies](#️-runtime-dependencies)
-  - [📦 Pre-Built Distribution Packages](#-pre-built-distribution-packages)
-  - [🛠️ Build from Source](#️-build-from-source)
-- [🧪 Running Tests](#-running-tests)
-- [🙏 Acknowledgments](#-acknowledgments)
-- [📄 License & Changelog](#-license--changelog)
+  - [Uninstallation](#uninstallation)
+  - [Runtime Dependencies](#runtime-dependencies)
+  - [Pre-Built Distribution Packages](#pre-built-distribution-packages)
+  - [Build from Source](#build-from-source)
+- [Running Tests](#running-tests)
+- [Acknowledgments](#acknowledgments)
+- [License & Changelog](#license--changelog)
 
 ---
 
-## 🌟 Key Features
+## Key Features
 
-### ⚡ Quick Connect (<kbd>Ctrl+K</kbd>)
+### Quick Connect (<kbd>Ctrl+K</kbd>)
 * **Universal URI & Shorthand Parsing**: Connect instantly using URIs (`ssh://user@host:port`, `rdp://admin@server`, `vnc://10.0.0.5:5901`, `spice://hypervisor:5900`) or intuitive shorthands (`user@host:2222`, `host:3389`, IPv6 `[fe80::1]:22`).
 * **Live Autocomplete**: Dynamic, real-time extraction and field population for protocols, hosts, ports, and usernames as you type.
 * **Dual Execution Modes**: Launch immediately for one-off ad-hoc sessions ("Connect") or persist directly to your connection library ("Save & Connect").
 
-### 🟢 Live Host Reachability Prober & Smart Wake-on-LAN
+### Host Reachability Prober & Smart Wake-on-LAN
 * **Non-Blocking Reachability Status**: Asynchronous background TCP probing displays real-time connection status in the sidebar:
   * 🟢 **Online**: Live host reachable with latency tooltip (e.g. `Online (12 ms)`).
   * 🔴 **Offline**: Host unreachable with specific failure reason (e.g. `Connection refused`, `Connection timed out`).
@@ -67,7 +68,7 @@ wget -qO- https://raw.githubusercontent.com/dawiisss/ver/main/install.sh | bash
 * **Integrated Wake-on-LAN (WoL)**: Send magic packets directly from the Connection Editor with support for standard, hyphenated, Cisco dot, and raw MAC formats.
 * **Automated Post-WoL Polling**: Initiates a 30-second background polling cycle, automatically transitioning the status dot to 🟢 Online and triggering a desktop toast notification as soon as the target machine responds.
 
-### 🔄 Import & Export Ecosystem (<kbd>Ctrl+I</kbd> / <kbd>Ctrl+E</kbd>)
+### Import & Export Ecosystem (<kbd>Ctrl+I</kbd> / <kbd>Ctrl+E</kbd>)
 * **Remmina Migration**: Auto-scan `~/.local/share/remmina/*.remmina` profiles or import individual files with automatic extraction of display depths, audio redirection, multimon, and SSH keys.
 * **OpenSSH `~/.ssh/config`**: Auto-detects and imports host blocks, hostnames, usernames, custom ports, and expanded identity files (`~/.ssh/id_*`).
 * **Microsoft `.rdp` Support**: Seamless import and export of standard Windows Remote Desktop `.rdp` configuration files.
@@ -75,30 +76,30 @@ wget -qO- https://raw.githubusercontent.com/dawiisss/ver/main/install.sh | bash
 * **Selective Export (<kbd>Ctrl+E</kbd>)**: Granular multi-selection checklist with "Select All" / "Deselect All", dynamic counter, and smart focus pre-selection.
 * **Conflict Resolution**: Choose between *Skip Duplicates*, *Overwrite Existing*, or *Keep Both (Rename with Suffix)* when importing.
 
-### 🔍 Local Network & Service Discovery (<kbd>Ctrl+D</kbd>)
+### Local Network & Service Discovery (<kbd>Ctrl+D</kbd>)
 * **Subnet Scanning**: Automatically probes your local network interfaces and subnets for active RDP (3389), VNC (5900), and SSH (22) services.
 * **One-Click Import**: Quickly add discovered network machines directly into your connection inventory.
 
-### 🖥️ Multi-Protocol Support
+### Multi-Protocol Support
 * **RDP & XRDP**: Powered by `xfreerdp3` with support for dynamic resolution, multimon, audio redirection, clipboard sharing, gateway servers, shared folders, security protocol negotiation (NLA, TLS, RDP, ExtNLA), and certificate verification policies (TOFU, Strict Deny, Ignore).
 * **VNC**: Seamless integration with `vncviewer` with automated credential passing and color level selection.
 * **SPICE**: High-performance hypervisor and VM streaming via `remote-viewer`.
 * **SSH**: Direct launch into your favorite desktop terminal emulator (`ptyxis`, `kgx`, `gnome-terminal`, `konsole`, `alacritty`, `foot`, `wezterm`, `xterm`) with custom private key identity paths (`-i`).
 
-### 🔒 Enterprise-Grade Security
+### Enterprise-Grade Security
 * **RDP Stdin Credential Hardening**: Passwords are piped over standard input via `xfreerdp3 /from-stdin:force`, eliminating credential exposure in `/proc/<pid>/cmdline` and process monitoring utilities (`ps`, `top`).
 * **Secret Service Keyring Integration**: Securely store connection passwords in your native system keyring (`gnome-keyring`, `kwallet`, `keepassxc`) via the Freedesktop Secret Service API (`oo7`).
 * **Configuration Hardening**: Strict `0700` Unix directory permissions on all user configuration paths (`~/.config/ver`).
 * **Clean Process Group Signaling**: Process group signal termination (`-(pid as i32)`) ensures child shells, SSH sessions, and terminal wrappers exit cleanly without orphaned processes.
 
-### 🔔 Active Session Tracking & System Tray
+### Active Session Tracking & System Tray
 * **Live Session Badges**: Real-time "Active" sidebar indicators showing currently connected sessions.
 * **Session Logs**: Embedded log view streaming live process output and connection events.
 * **System Tray Indicator**: Background StatusNotifierItem tray icon for quick window toggle and persistent daemon mode.
 
 ---
 
-## ⌨️ Global Keyboard Shortcuts
+## Global Keyboard Shortcuts
 
 VER features comprehensive keyboard accelerators adhering to GNOME HIG standards:
 
@@ -119,7 +120,7 @@ VER features comprehensive keyboard accelerators adhering to GNOME HIG standards
 
 ---
 
-## 📦 Installation & Packaging
+## Installation & Packaging
 
 ### Automated Installation
 
@@ -156,7 +157,7 @@ curl -fsSL https://raw.githubusercontent.com/dawiisss/ver/main/install.sh | bash
 
 ---
 
-### 🗑️ Uninstallation
+### Uninstallation
 
 To remove VER and its desktop launchers, run the uninstallation script:
 
@@ -176,7 +177,7 @@ sudo ./uninstall.sh --system
 
 ---
 
-### ⚙️ Runtime Dependencies
+### Runtime Dependencies
 
 Ensure the backend tools for your required protocols are installed on your system:
 
@@ -189,7 +190,7 @@ Ensure the backend tools for your required protocols are installed on your syste
 
 ---
 
-### 📦 Pre-Built Distribution Packages
+### Pre-Built Distribution Packages
 
 You can download pre-built packages from [GitHub Releases](https://github.com/dawiisss/ver/releases/latest) or build native packages locally:
 
@@ -202,7 +203,7 @@ You can download pre-built packages from [GitHub Releases](https://github.com/da
 
 ---
 
-### 🛠️ Build from Source
+### Build from Source
 
 #### 1. Install Build Dependencies
 
@@ -234,7 +235,7 @@ The compiled binary will be located at `target/release/ver`. You can install it 
 
 ---
 
-## 🧪 Running Tests
+## Running Tests
 
 Run the complete test suite across all unit, boundary, network, prober, and UI targets:
 ```bash
@@ -248,7 +249,7 @@ cargo clippy --all-targets --all-features -- -D warnings
 
 ---
 
-## 🙏 Acknowledgments
+## Acknowledgments
 
 VER is built on the shoulders of remarkable open-source projects and communities:
 
@@ -263,7 +264,7 @@ VER is built on the shoulders of remarkable open-source projects and communities
 
 ---
 
-## 📄 License & Changelog
+## License & Changelog
 
 * **License**: Distributed under the [MIT License](LICENSE).
 * **Changelog**: See [CHANGELOG.md](CHANGELOG.md) for detailed version history and release notes.
