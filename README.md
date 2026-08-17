@@ -22,7 +22,8 @@ curl -fsSL https://raw.githubusercontent.com/dawiisss/ver/main/install.sh | bash
 wget -qO- https://raw.githubusercontent.com/dawiisss/ver/main/install.sh | bash
 ```
 
-> Installs the standalone binary to `~/.local/bin/ver` and registers desktop menu launchers and icons.  
+> **Note:** Installs the standalone binary to `~/.local/bin/ver` and registers desktop menu launchers and icons.  
+> Please check the [Runtime Dependencies](#runtime-dependencies) section to ensure you have the required protocol backends installed (e.g. `xfreerdp3`, `vncviewer`, `remote-viewer`).  
 > For system-wide installation, distro packages, or building from source, see [Installation & Packaging](#installation--packaging).
 
 ---
