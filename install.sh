@@ -73,14 +73,14 @@ ${COLOR_BOLD}OPTIONS:${COLOR_RESET}
     ${COLOR_CYAN}-u, --user${COLOR_RESET}             Install to user space (~/.local) [Default for non-root users]
     ${COLOR_CYAN}-s, --system${COLOR_RESET}           Install system-wide (/usr/local) [Default when run with sudo/root]
     ${COLOR_CYAN}-p, --prefix <DIR>${COLOR_RESET}     Specify custom installation prefix directory
-    ${COLOR_CYAN}-v, --version <TAG>${COLOR_RESET}    Install a specific release version (e.g. 'v1.3.0' or '1.3.0')
-    ${COLOR_CYAN}-l, --local${COLOR_RESET}            Install from local repository build (target/release/ver)
+    ${COLOR_CYAN}-v, --version <TAG>${COLOR_RESET}    Install a specific release version (e.g. 'v1.3.1' or '1.3.1')
+    ${COLOR_CYAN}-l, --local${COLOR_RESET}            Install locally built binary from target/release/ver
     ${COLOR_CYAN}-n, --dry-run${COLOR_RESET}          Simulate installation actions without making changes
     ${COLOR_CYAN}--no-deps-check${COLOR_RESET}        Skip checking for optional runtime dependencies
     ${COLOR_CYAN}-h, --help${COLOR_RESET}             Show this help message
 
 ${COLOR_BOLD}ENVIRONMENT VARIABLES:${COLOR_RESET}
-    ${COLOR_CYAN}VERSION${COLOR_RESET}                Target release version to download (e.g. VERSION=v1.3.0)
+    ${COLOR_CYAN}VERSION${COLOR_RESET}                Target release version to download (e.g. VERSION=v1.3.1)
     ${COLOR_CYAN}PREFIX${COLOR_RESET}                 Target installation prefix (e.g. PREFIX=/opt/ver)
     ${COLOR_CYAN}INSTALL_MODE${COLOR_RESET}           'user' or 'system'
 
@@ -88,7 +88,7 @@ ${COLOR_BOLD}EXAMPLES:${COLOR_RESET}
     curl -fsSL https://raw.githubusercontent.com/${REPO}/main/install.sh | bash
     ./install.sh --user
     sudo ./install.sh --system
-    ./install.sh --version v1.3.0
+    ./install.sh --version v1.3.1
     ./install.sh --local
 
 EOF

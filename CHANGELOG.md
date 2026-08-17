@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.1] - 2026-08-17
+
+### Changed
+- **Branding & Identity**: Updated project title to **VER - Very Easy Remote Manager** across the application, desktop metadata, and documentation.
+- **Documentation Overhaul**: Added Table of Contents, moved Quick Install to top of README, added Runtime Dependencies guidance, and documented low memory footprint (~25 MB RAM).
+- **Build Reproducibility**: Added `Cargo.lock` to version control for deterministic builds across all platforms and CI runners.
+
 ## [1.3.0] - 2026-08-15
 
 ### Added

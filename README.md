@@ -149,7 +149,7 @@ Installs the binary to `/usr/local/bin/ver` and desktop launchers to `/usr/local
 #### Install Options & Version Pinning:
 ```bash
 # Install a specific release version
-curl -fsSL https://raw.githubusercontent.com/dawiisss/ver/main/install.sh | bash -s -- --version v1.3.0
+curl -fsSL https://raw.githubusercontent.com/dawiisss/ver/main/install.sh | bash -s -- --version v1.3.1
 
 # Install to a custom prefix directory
 ./install.sh --prefix /opt/ver
