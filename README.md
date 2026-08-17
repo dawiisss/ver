@@ -100,7 +100,7 @@ wget -qO- https://raw.githubusercontent.com/dawiisss/ver/main/install.sh | bash
 * **System Tray Indicator**: Background StatusNotifierItem tray icon for quick window toggle and persistent daemon mode.
 
 ### Blazing Fast & Memory Efficient
-* **Minimal Memory Footprint**: Pure native compiled Rust architecture with GTK4/Libadwaita consumes negligible RAM (typically ~20–35 MB baseline), avoiding the multi-hundred megabyte bloat of Electron-based tools.
+* **Minimal Memory Footprint**: Pure native compiled Rust architecture with GTK4/Libadwaita consumes negligible RAM (typically ~20–35 MB baseline).
 * **Instant Startup & Responsive UI**: Zero runtime overhead, sub-second launch times, and non-blocking asynchronous event handling across background network probes and connection sessions.
 
 ---
