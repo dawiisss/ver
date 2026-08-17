@@ -10,6 +10,47 @@
 
 ---
 
+## ⚡ Quick Install
+
+Install the latest release of VER on any Linux distribution with a single command (no root required):
+
+```bash
+# Using curl
+curl -fsSL https://raw.githubusercontent.com/dawiisss/ver/main/install.sh | bash
+
+# Or using wget
+wget -qO- https://raw.githubusercontent.com/dawiisss/ver/main/install.sh | bash
+```
+
+> Installs the standalone binary to `~/.local/bin/ver` and registers desktop menu launchers and icons.  
+> For system-wide installation, distro packages, or building from source, see [Installation & Packaging](#-installation--packaging).
+
+---
+
+## 📑 Table of Contents
+
+- [⚡ Quick Install](#-quick-install)
+- [🌟 Key Features](#-key-features)
+  - [⚡ Quick Connect (<kbd>Ctrl+K</kbd>)](#-quick-connect-ctrlk)
+  - [🟢 Live Host Reachability Prober & Smart Wake-on-LAN](#-live-host-reachability-prober--smart-wake-on-lan)
+  - [🔄 Import & Export Ecosystem (<kbd>Ctrl+I</kbd> / <kbd>Ctrl+E</kbd>)](#-import--export-ecosystem-ctrli--ctrle)
+  - [🔍 Local Network & Service Discovery (<kbd>Ctrl+D</kbd>)](#-local-network--service-discovery-ctrld)
+  - [🖥️ Multi-Protocol Support](#️-multi-protocol-support)
+  - [🔒 Enterprise-Grade Security](#-enterprise-grade-security)
+  - [🔔 Active Session Tracking & System Tray](#-active-session-tracking--system-tray)
+- [⌨️ Global Keyboard Shortcuts](#️-global-keyboard-shortcuts)
+- [📦 Installation & Packaging](#-installation--packaging)
+  - [Install Options & Version Pinning](#install-options--version-pinning)
+  - [🗑️ Uninstallation](#️-uninstallation)
+  - [⚙️ Runtime Dependencies](#️-runtime-dependencies)
+  - [📦 Pre-Built Distribution Packages](#-pre-built-distribution-packages)
+  - [🛠️ Build from Source](#️-build-from-source)
+- [🧪 Running Tests](#-running-tests)
+- [🙏 Acknowledgments](#-acknowledgments)
+- [📄 License & Changelog](#-license--changelog)
+
+---
+
 ## 🌟 Key Features
 
 ### ⚡ Quick Connect (<kbd>Ctrl+K</kbd>)
@@ -80,9 +121,7 @@ VER features comprehensive keyboard accelerators adhering to GNOME HIG standards
 
 ## 📦 Installation & Packaging
 
-### ⚡ Quick Install (GitHub Releases)
-
-The easiest way to install VER on any Linux distribution is via the automated installer, which fetches the latest release bundle from GitHub and configures desktop integration (launchers, icons, PATH):
+### Automated Installation
 
 #### User Installation (No root / sudo required):
 ```bash
@@ -150,7 +189,7 @@ Ensure the backend tools for your required protocols are installed on your syste
 
 ---
 
-### 📦 Distribution Packages
+### 📦 Pre-Built Distribution Packages
 
 You can download pre-built packages from [GitHub Releases](https://github.com/dawiisss/ver/releases/latest) or build native packages locally:
 
