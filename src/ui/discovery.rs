@@ -107,221 +107,253 @@ impl DiscoveryDialog {
         let on_add = Arc::new(on_add_callback);
         let is_scanning = Arc::new(std::sync::atomic::AtomicBool::new(false));
 
-        let start_scan =
-            move |list_box: gtk::ListBox,
-                  spinner: gtk::Spinner,
-                  status_label: gtk::Label,
-                  on_add: Arc<F>,
-                  is_scanning: Arc<std::sync::atomic::AtomicBool>| {
-                if is_scanning
-                    .compare_exchange(
-                        false,
-                        true,
-                        std::sync::atomic::Ordering::SeqCst,
-                        std::sync::atomic::Ordering::SeqCst,
-                    )
-                    .is_err()
-                {
-                    return;
-                }
+        let start_scan = move |list_box: gtk::ListBox,
+                               spinner: gtk::Spinner,
+                               status_label: gtk::Label,
+                               on_add: Arc<F>,
+                               is_scanning: Arc<std::sync::atomic::AtomicBool>|
+              -> Option<Arc<std::sync::atomic::AtomicBool>> {
+            if is_scanning
+                .compare_exchange(
+                    false,
+                    true,
+                    std::sync::atomic::Ordering::SeqCst,
+                    std::sync::atomic::Ordering::SeqCst,
+                )
+                .is_err()
+            {
+                return None;
+            }
 
-                // Clear existing list items
-                while let Some(child) = list_box.first_child() {
-                    list_box.remove(&child);
-                }
+            // Clear existing list items
+            while let Some(child) = list_box.first_child() {
+                list_box.remove(&child);
+            }
 
-                spinner.set_spinning(true);
-                status_label.set_text("Scanning local network for VNC, RDP, SSH hosts...");
+            spinner.set_spinning(true);
+            status_label.set_text("Scanning local network for VNC, RDP, SSH hosts...");
 
-                let (sender, receiver) = async_channel::unbounded::<Option<DiscoveredService>>();
+            let (sender, receiver) = async_channel::unbounded::<Option<DiscoveredService>>();
 
-                let is_scanning_receiver = is_scanning.clone();
-                let spinner_local = spinner.clone();
-                let status_label_local = status_label.clone();
-                let list_box_local = list_box.clone();
-                let on_add_local = on_add.clone();
+            let is_scanning_receiver = is_scanning.clone();
+            let spinner_local = spinner.clone();
+            let status_label_local = status_label.clone();
+            let list_box_local = list_box.clone();
+            let on_add_local = on_add.clone();
 
-                glib::MainContext::default().spawn_local(async move {
-                    while let Ok(msg) = receiver.recv().await {
-                        match msg {
-                            Some(service) => {
-                                let row = adw::ActionRow::builder()
-                                    .title(&service.name)
-                                    .subtitle(format!(
-                                        "{}:{} ({})",
-                                        service.host,
-                                        service.port,
-                                        service.protocol.to_uppercase()
-                                    ))
-                                    .build();
+            glib::MainContext::default().spawn_local(async move {
+                while let Ok(msg) = receiver.recv().await {
+                    match msg {
+                        Some(service) => {
+                            let row = adw::ActionRow::builder()
+                                .title(&service.name)
+                                .subtitle(format!(
+                                    "{}:{} ({})",
+                                    service.host,
+                                    service.port,
+                                    service.protocol.to_uppercase()
+                                ))
+                                .build();
 
-                                let icon_name = match service.protocol.to_lowercase().as_str() {
-                                    "vnc" => "computer-symbolic",
-                                    "ssh" => "utilities-terminal-symbolic",
-                                    "rdp" => "video-display-symbolic",
-                                    _ => "display-symbolic",
+                            let icon_name = match service.protocol.to_lowercase().as_str() {
+                                "vnc" => "computer-symbolic",
+                                "ssh" => "utilities-terminal-symbolic",
+                                "rdp" => "video-display-symbolic",
+                                _ => "display-symbolic",
+                            };
+                            let icon = gtk::Image::from_icon_name(icon_name);
+                            row.add_prefix(&icon);
+
+                            let add_btn = gtk::Button::builder()
+                                .label("Add")
+                                .css_classes(vec!["suggested-action"])
+                                .valign(gtk::Align::Center)
+                                .build();
+
+                            let service_clone = service.clone();
+                            let on_add_clone = on_add_local.clone();
+                            add_btn.connect_clicked(move |btn| {
+                                let proto = match service_clone.protocol.to_lowercase().as_str() {
+                                    "vnc" => Protocol::Vnc,
+                                    "ssh" => Protocol::Ssh,
+                                    _ => Protocol::Rdp,
                                 };
-                                let icon = gtk::Image::from_icon_name(icon_name);
-                                row.add_prefix(&icon);
+                                let mut conn = Connection::new_with_protocol(proto);
+                                conn.name = service_clone.name.clone();
+                                conn.host = service_clone.host.clone();
+                                conn.port = service_clone.port;
+                                conn.group = "Discovered".to_string();
 
-                                let add_btn = gtk::Button::builder()
-                                    .label("Add")
-                                    .css_classes(vec!["suggested-action"])
-                                    .valign(gtk::Align::Center)
-                                    .build();
+                                on_add_clone(conn);
 
-                                let service_clone = service.clone();
-                                let on_add_clone = on_add_local.clone();
-                                add_btn.connect_clicked(move |btn| {
-                                    let proto = match service_clone.protocol.to_lowercase().as_str()
-                                    {
-                                        "vnc" => Protocol::Vnc,
-                                        "ssh" => Protocol::Ssh,
-                                        _ => Protocol::Rdp,
-                                    };
-                                    let mut conn = Connection::new_with_protocol(proto);
-                                    conn.name = service_clone.name.clone();
-                                    conn.host = service_clone.host.clone();
-                                    conn.port = service_clone.port;
-                                    conn.group = "Discovered".to_string();
+                                btn.set_sensitive(false);
+                                btn.set_label("Added");
+                            });
 
-                                    on_add_clone(conn);
+                            row.add_suffix(&add_btn);
+                            list_box_local.append(&row);
+                        }
+                        None => {
+                            spinner_local.set_spinning(false);
+                            status_label_local.set_text("Scan complete.");
+                            is_scanning_receiver.store(false, std::sync::atomic::Ordering::SeqCst);
+                            break;
+                        }
+                    }
+                }
+            });
 
-                                    btn.set_sensitive(false);
-                                    btn.set_label("Added");
-                                });
+            let cancel_token = Arc::new(std::sync::atomic::AtomicBool::new(false));
+            let cancel_token_thread = cancel_token.clone();
 
-                                row.add_suffix(&add_btn);
-                                list_box_local.append(&row);
+            // Spawn scanner thread pool
+            thread::spawn(move || {
+                let targets = vec![("localhost", "127.0.0.1")];
+
+                // Standard ports to probe: (Port, Protocol Name)
+                let ports: &[(u16, &str)] = &[(5900, "vnc"), (3389, "rdp"), (22, "ssh")];
+
+                // Probe local targets
+                for (name, ip_str) in targets {
+                    if cancel_token_thread.load(std::sync::atomic::Ordering::SeqCst) {
+                        let _ = sender.send_blocking(None);
+                        return;
+                    }
+                    if let Ok(ip) = ip_str.parse::<IpAddr>() {
+                        for &(port, proto) in ports {
+                            let addr = SocketAddr::new(ip, port);
+                            if TcpStream::connect_timeout(&addr, Duration::from_millis(150)).is_ok()
+                            {
+                                let service = DiscoveredService {
+                                    name: format!("{} ({})", name, proto.to_uppercase()),
+                                    protocol: proto.to_string(),
+                                    host: ip_str.to_string(),
+                                    port,
+                                };
+                                let _ = sender.send_blocking(Some(service));
                             }
-                            None => {
-                                spinner_local.set_spinning(false);
-                                status_label_local.set_text("Scan complete.");
-                                is_scanning_receiver
-                                    .store(false, std::sync::atomic::Ordering::SeqCst);
+                        }
+                    }
+                }
+
+                // Subnet sweep
+                let mut subnet_prefix = "192.168.1".to_string(); // Fallback
+                if let Ok(my_ip) = local_ip() {
+                    match my_ip {
+                        IpAddr::V4(ipv4) => {
+                            let octets = ipv4.octets();
+                            subnet_prefix = format!("{}.{}.{}", octets[0], octets[1], octets[2]);
+                        }
+                        IpAddr::V6(_) => {}
+                    }
+                }
+
+                let (host_tx, host_rx) = async_channel::unbounded::<u8>();
+                for host_id in 1..=254 {
+                    let _ = host_tx.send_blocking(host_id);
+                }
+                drop(host_tx);
+
+                let num_workers = 16;
+                let mut handles = vec![];
+                for _ in 0..num_workers {
+                    let host_rx_clone = host_rx.clone();
+                    let prefix = subnet_prefix.clone();
+                    let sender_clone = sender.clone();
+                    let cancel_worker = cancel_token_thread.clone();
+
+                    let handle = thread::spawn(move || {
+                        while let Ok(host_id) = host_rx_clone.recv_blocking() {
+                            if cancel_worker.load(std::sync::atomic::Ordering::SeqCst) {
                                 break;
                             }
-                        }
-                    }
-                });
-
-                // Spawn scanner thread pool
-                thread::spawn(move || {
-                    let targets = vec![("localhost", "127.0.0.1")];
-
-                    // Standard ports to probe: (Port, Protocol Name)
-                    let ports: &[(u16, &str)] = &[(5900, "vnc"), (3389, "rdp"), (22, "ssh")];
-
-                    // Probe local targets
-                    for (name, ip_str) in targets {
-                        if let Ok(ip) = ip_str.parse::<IpAddr>() {
-                            for &(port, proto) in ports {
-                                let addr = SocketAddr::new(ip, port);
-                                if TcpStream::connect_timeout(&addr, Duration::from_millis(150))
-                                    .is_ok()
-                                {
-                                    let service = DiscoveredService {
-                                        name: format!("{} ({})", name, proto.to_uppercase()),
-                                        protocol: proto.to_string(),
-                                        host: ip_str.to_string(),
-                                        port,
-                                    };
-                                    let _ = sender.send_blocking(Some(service));
-                                }
-                            }
-                        }
-                    }
-
-                    // Subnet sweep
-                    let mut subnet_prefix = "192.168.1".to_string(); // Fallback
-                    if let Ok(my_ip) = local_ip() {
-                        match my_ip {
-                            IpAddr::V4(ipv4) => {
-                                let octets = ipv4.octets();
-                                subnet_prefix =
-                                    format!("{}.{}.{}", octets[0], octets[1], octets[2]);
-                            }
-                            IpAddr::V6(_) => {}
-                        }
-                    }
-
-                    let (host_tx, host_rx) = async_channel::unbounded::<u8>();
-                    for host_id in 1..=254 {
-                        let _ = host_tx.send_blocking(host_id);
-                    }
-                    drop(host_tx);
-
-                    let num_workers = 16;
-                    let mut handles = vec![];
-                    for _ in 0..num_workers {
-                        let host_rx_clone = host_rx.clone();
-                        let prefix = subnet_prefix.clone();
-                        let sender_clone = sender.clone();
-
-                        let handle = thread::spawn(move || {
-                            while let Ok(host_id) = host_rx_clone.recv_blocking() {
-                                let ip_str = format!("{}.{}", prefix, host_id);
-                                if let Ok(ip) = ip_str.parse::<IpAddr>() {
-                                    let ports: &[(u16, &str)] =
-                                        &[(5900, "vnc"), (3389, "rdp"), (22, "ssh")];
-                                    for &(port, proto) in ports {
-                                        let addr = SocketAddr::new(ip, port);
-                                        if TcpStream::connect_timeout(
-                                            &addr,
-                                            Duration::from_millis(150),
-                                        )
+                            let ip_str = format!("{}.{}", prefix, host_id);
+                            if let Ok(ip) = ip_str.parse::<IpAddr>() {
+                                let ports: &[(u16, &str)] =
+                                    &[(5900, "vnc"), (3389, "rdp"), (22, "ssh")];
+                                for &(port, proto) in ports {
+                                    if cancel_worker.load(std::sync::atomic::Ordering::SeqCst) {
+                                        break;
+                                    }
+                                    let addr = SocketAddr::new(ip, port);
+                                    if TcpStream::connect_timeout(&addr, Duration::from_millis(150))
                                         .is_ok()
-                                        {
-                                            let service = DiscoveredService {
-                                                name: format!(
-                                                    "Host {} ({})",
-                                                    ip_str,
-                                                    proto.to_uppercase()
-                                                ),
-                                                protocol: proto.to_string(),
-                                                host: ip_str.clone(),
-                                                port,
-                                            };
-                                            let _ = sender_clone.send_blocking(Some(service));
-                                        }
+                                    {
+                                        let service = DiscoveredService {
+                                            name: format!(
+                                                "Host {} ({})",
+                                                ip_str,
+                                                proto.to_uppercase()
+                                            ),
+                                            protocol: proto.to_string(),
+                                            host: ip_str.clone(),
+                                            port,
+                                        };
+                                        let _ = sender_clone.send_blocking(Some(service));
                                     }
                                 }
                             }
-                        });
-                        handles.push(handle);
-                    }
+                        }
+                    });
+                    handles.push(handle);
+                }
 
-                    for handle in handles {
-                        let _ = handle.join();
-                    }
+                for handle in handles {
+                    let _ = handle.join();
+                }
 
-                    let _ = sender.send_blocking(None);
-                });
-            };
+                let _ = sender.send_blocking(None);
+            });
 
-        let list_box_clone = list_box.clone();
-        let spinner_clone = spinner.clone();
-        let status_label_clone = status_label.clone();
-        let on_add_clone = on_add.clone();
-        let is_scanning_clone = is_scanning.clone();
+            Some(cancel_token)
+        };
 
-        start_scan(
-            list_box.clone(),
-            spinner.clone(),
-            status_label.clone(),
-            on_add.clone(),
-            is_scanning.clone(),
-        );
+        let current_cancel_token: Arc<
+            std::sync::Mutex<Option<Arc<std::sync::atomic::AtomicBool>>>,
+        > = Arc::new(std::sync::Mutex::new(None));
 
-        refresh_btn.connect_clicked(move |_| {
-            start_scan(
-                list_box_clone.clone(),
-                spinner_clone.clone(),
-                status_label_clone.clone(),
-                on_add_clone.clone(),
-                is_scanning_clone.clone(),
-            );
-        });
+        let run_scan = {
+            let list_box = list_box.clone();
+            let spinner = spinner.clone();
+            let status_label = status_label.clone();
+            let on_add = on_add.clone();
+            let is_scanning = is_scanning.clone();
+            let current_cancel = current_cancel_token.clone();
+
+            move || {
+                // Cancel any ongoing scan first
+                if let Some(prev_token) = current_cancel.lock().unwrap().take() {
+                    prev_token.store(true, std::sync::atomic::Ordering::SeqCst);
+                }
+                let token = start_scan(
+                    list_box.clone(),
+                    spinner.clone(),
+                    status_label.clone(),
+                    on_add.clone(),
+                    is_scanning.clone(),
+                );
+                *current_cancel.lock().unwrap() = token;
+            }
+        };
+
+        run_scan();
+
+        {
+            let do_scan = run_scan.clone();
+            refresh_btn.connect_clicked(move |_| {
+                do_scan();
+            });
+        }
+
+        {
+            let cancel_on_close = current_cancel_token.clone();
+            window.connect_close_request(move |_| {
+                if let Some(token) = cancel_on_close.lock().unwrap().take() {
+                    token.store(true, std::sync::atomic::Ordering::SeqCst);
+                }
+                glib::Propagation::Proceed
+            });
+        }
 
         window
     }

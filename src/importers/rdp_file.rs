@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 
-use crate::importers::ImporterError;
+use crate::importers::{parse_host_port, ImporterError};
 use crate::models::{
     AdvancedSettings, Connection, Protocol, RdpCertHandling, RdpColorDepth, RdpSecurityProtocol,
 };
@@ -161,11 +161,61 @@ pub fn import_rdp_content(
     })
 }
 
-/// Reads and imports an `.rdp` file at `path`.
+/// Reads and imports an `.rdp` file at `path`, decoding UTF-8 or UTF-16 LE/BE as necessary.
 pub fn import_rdp_file(path: &Path) -> Result<Connection, ImporterError> {
-    let content = fs::read_to_string(path)?;
+    let bytes = fs::read(path)?;
+    let content = decode_rdp_bytes(&bytes)?;
     let filename = path.file_name().and_then(|s| s.to_str());
     import_rdp_content(&content, filename)
+}
+
+fn decode_rdp_bytes(bytes: &[u8]) -> Result<String, ImporterError> {
+    if bytes.len() >= 2 && bytes[0] == 0xFF && bytes[1] == 0xFE {
+        // UTF-16LE with BOM
+        let u16_slice: Vec<u16> = bytes[2..]
+            .chunks_exact(2)
+            .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]]))
+            .collect();
+        return char::decode_utf16(u16_slice)
+            .collect::<Result<String, _>>()
+            .map_err(|e| {
+                ImporterError::InvalidFormat(format!("Invalid UTF-16LE encoding: {}", e))
+            });
+    } else if bytes.len() >= 2 && bytes[0] == 0xFE && bytes[1] == 0xFF {
+        // UTF-16BE with BOM
+        let u16_slice: Vec<u16> = bytes[2..]
+            .chunks_exact(2)
+            .map(|chunk| u16::from_be_bytes([chunk[0], chunk[1]]))
+            .collect();
+        return char::decode_utf16(u16_slice)
+            .collect::<Result<String, _>>()
+            .map_err(|e| {
+                ImporterError::InvalidFormat(format!("Invalid UTF-16BE encoding: {}", e))
+            });
+    } else if bytes.len() >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF {
+        // UTF-8 with BOM
+        return String::from_utf8(bytes[3..].to_vec())
+            .map_err(|e| ImporterError::InvalidFormat(format!("Invalid UTF-8 encoding: {}", e)));
+    }
+
+    // Try standard UTF-8, fall back to lossy conversion if needed
+    match String::from_utf8(bytes.to_vec()) {
+        Ok(s) => Ok(s),
+        Err(_) => {
+            // Check for UTF-16LE without BOM (common when alternating null bytes exist)
+            if bytes.len() >= 4 && bytes.len().is_multiple_of(2) && (bytes[1] == 0 || bytes[3] == 0)
+            {
+                let u16_slice: Vec<u16> = bytes
+                    .chunks_exact(2)
+                    .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]]))
+                    .collect();
+                if let Ok(s) = char::decode_utf16(u16_slice).collect::<Result<String, _>>() {
+                    return Ok(s);
+                }
+            }
+            Ok(String::from_utf8_lossy(bytes).into_owned())
+        }
+    }
 }
 
 /// Exports a VER `Connection` as a standard `.rdp` file string.
@@ -245,34 +295,4 @@ pub fn export_rdp_file(conn: &Connection) -> String {
     }
 
     lines.join("\r\n")
-}
-
-fn parse_host_port(server: &str, default_port: u16) -> (String, u16) {
-    let trimmed = server.trim();
-    if trimmed.is_empty() {
-        return (String::new(), default_port);
-    }
-
-    if trimmed.starts_with('[') {
-        if let Some(close_idx) = trimmed.find(']') {
-            let host = trimmed[1..close_idx].to_string();
-            let remainder = &trimmed[close_idx + 1..];
-            if let Some(port_str) = remainder.strip_prefix(':') {
-                if let Ok(port) = port_str.parse::<u16>() {
-                    return (host, port);
-                }
-            }
-            return (host, default_port);
-        }
-    }
-
-    if let Some((h, p)) = trimmed.rsplit_once(':') {
-        if !h.contains(':') {
-            if let Ok(port) = p.parse::<u16>() {
-                return (h.to_string(), port);
-            }
-        }
-    }
-
-    (trimmed.to_string(), default_port)
 }

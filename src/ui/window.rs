@@ -1025,6 +1025,7 @@ impl MainWindow {
         let show_session_for_select = show_external_session.clone();
         let create_row_for_select = create_row.clone();
         let toast_overlay_for_select = toast_overlay.clone();
+        let window_title_for_select = window_title.clone();
 
         list_box.connect_row_selected(move |_, row_opt| {
             while let Some(child) = editor_container_for_select.first_child() {
@@ -1056,6 +1057,7 @@ impl MainWindow {
                     // Wire Callbacks for ConnectionEditor
                     let state_on_save = state_for_select.clone();
                     let list_box_on_save = list_box_for_select.clone();
+                    let toast_on_save = toast_overlay_for_select.clone();
                     let row_on_save = row.clone();
                     let on_save = move |updated_conn: Connection, updated_pass: String| {
                         if let Some(c) = state_on_save
@@ -1066,7 +1068,14 @@ impl MainWindow {
                         {
                             *c = updated_conn.clone();
                         }
-                        let _ = storage::save_connections(&state_on_save.borrow().connections);
+                        if let Err(e) =
+                            storage::save_connections(&state_on_save.borrow().connections)
+                        {
+                            toast_on_save.add_toast(adw::Toast::new(&format!(
+                                "Failed to save connections: {}",
+                                e
+                            )));
+                        }
 
                         if updated_pass.is_empty() {
                             let _ = secrets::delete_password_sync(&updated_conn.id);
@@ -1097,11 +1106,19 @@ impl MainWindow {
 
                     let state_on_dup = state_for_select.clone();
                     let list_box_on_dup = list_box_for_select.clone();
-                    let window_title_on_dup = window_title.clone();
+                    let window_title_on_dup = window_title_for_select.clone();
+                    let toast_on_dup = toast_overlay_for_select.clone();
                     let create_row_on_dup = create_row_for_select.clone();
                     let on_duplicate = move |dup_conn: Connection, dup_pass: String| {
                         state_on_dup.borrow_mut().connections.push(dup_conn.clone());
-                        let _ = storage::save_connections(&state_on_dup.borrow().connections);
+                        if let Err(e) =
+                            storage::save_connections(&state_on_dup.borrow().connections)
+                        {
+                            toast_on_dup.add_toast(adw::Toast::new(&format!(
+                                "Failed to save connections: {}",
+                                e
+                            )));
+                        }
 
                         if !dup_pass.is_empty() {
                             let _ = secrets::set_password_sync(&dup_conn.id, &dup_pass);
@@ -1122,14 +1139,22 @@ impl MainWindow {
 
                     let state_on_del = state_for_select.clone();
                     let list_box_on_del = list_box_for_select.clone();
-                    let window_title_on_del = window_title.clone();
+                    let window_title_on_del = window_title_for_select.clone();
+                    let toast_on_del = toast_overlay_for_select.clone();
                     let row_on_del = row.clone();
                     let on_delete = move |del_id: String| {
                         state_on_del
                             .borrow_mut()
                             .connections
                             .retain(|c| c.id != del_id);
-                        let _ = storage::save_connections(&state_on_del.borrow().connections);
+                        if let Err(e) =
+                            storage::save_connections(&state_on_del.borrow().connections)
+                        {
+                            toast_on_del.add_toast(adw::Toast::new(&format!(
+                                "Failed to save connections: {}",
+                                e
+                            )));
+                        }
                         let _ = secrets::delete_password_sync(&del_id);
 
                         list_box_on_del.remove(&row_on_del);
@@ -1254,6 +1279,9 @@ impl MainWindow {
         let list_box_key = list_box.clone();
         let launch_session_key = launch_session.clone();
         let app_key = app.clone();
+        let toast_overlay_key = toast_overlay.clone();
+        let window_title_key = window_title.clone();
+        let window_key = window.clone();
 
         key_controller.connect_key_pressed(move |_, keyval, _keycode, state_flags| {
             let ctrl = state_flags.contains(gdk::ModifierType::CONTROL_MASK);
@@ -1315,6 +1343,60 @@ impl MainWindow {
                     gdk::Key::F1 => {
                         shortcuts_key();
                         return glib::Propagation::Stop;
+                    }
+                    gdk::Key::Delete => {
+                        if let Some(sel_row) = list_box_key.selected_row() {
+                            let id = sel_row.widget_name().to_string();
+                            let conn_opt = state_key
+                                .borrow()
+                                .connections
+                                .iter()
+                                .find(|c| c.id == id)
+                                .cloned();
+                            if let Some(conn) = conn_opt {
+                                let dialog = adw::MessageDialog::builder()
+                                    .heading("Delete Connection?")
+                                    .body(format!(
+                                        "Are you sure you want to delete \"{}\"? This action cannot be undone.",
+                                        conn.name
+                                    ))
+                                    .build();
+                                dialog.add_response("cancel", "Cancel");
+                                dialog.add_response("delete", "Delete");
+                                dialog.set_response_appearance("delete", adw::ResponseAppearance::Destructive);
+                                dialog.set_default_response(Some("cancel"));
+                                dialog.set_close_response("cancel");
+
+                                let state_del = state_key.clone();
+                                let list_box_del = list_box_key.clone();
+                                let window_title_del = window_title_key.clone();
+                                let toast_del = toast_overlay_key.clone();
+                                let sel_row_del = sel_row.clone();
+                                let del_id = conn.id.clone();
+
+                                dialog.connect_response(None, move |d, response| {
+                                    if response == "delete" {
+                                        state_del.borrow_mut().connections.retain(|c| c.id != del_id);
+                                        if let Err(e) = storage::save_connections(&state_del.borrow().connections) {
+                                            toast_del.add_toast(adw::Toast::new(&format!("Failed to save connections: {}", e)));
+                                        }
+                                        let _ = secrets::delete_password_sync(&del_id);
+                                        list_box_del.remove(&sel_row_del);
+                                        list_box_del.unselect_all();
+                                        window_title_del.set_subtitle(&format!(
+                                            "{} connections",
+                                            state_del.borrow().connections.len()
+                                        ));
+                                        toast_del.add_toast(adw::Toast::new("Connection deleted"));
+                                    }
+                                    d.close();
+                                });
+
+                                dialog.set_transient_for(Some(&window_key));
+                                dialog.present();
+                                return glib::Propagation::Stop;
+                            }
+                        }
                     }
                     gdk::Key::Return => {
                         if let Some(sel_row) = list_box_key.selected_row() {

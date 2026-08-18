@@ -234,6 +234,9 @@ impl QuickConnectDialog {
         content_box.append(&details_group);
         content_box.append(&button_box);
 
+        let banner = adw::Banner::builder().revealed(false).build();
+        toolbar_view.add_top_bar(&banner);
+
         toolbar_view.set_content(Some(&scrolled));
         window.set_content(Some(&toolbar_view));
 
@@ -244,8 +247,10 @@ impl QuickConnectDialog {
         let port_row_clone = port_row.clone();
         let user_row_clone = user_row.clone();
         let proto_row_clone = proto_row.clone();
+        let banner_input = banner.clone();
 
         uri_entry.connect_changed(move |entry| {
+            banner_input.set_revealed(false);
             if *updating_clone.borrow() {
                 return;
             }
@@ -294,7 +299,7 @@ impl QuickConnectDialog {
             move || -> Result<(Connection, Option<String>), String> {
                 let host = host_row.text().trim().to_string();
                 if host.is_empty() {
-                    return Err("Host is required".to_string());
+                    return Err("Host address is required".to_string());
                 }
 
                 let protocol = match proto_row.selected() {
@@ -341,30 +346,36 @@ impl QuickConnectDialog {
         let on_connect_clone = on_connect.clone();
         let get_conn_connect = get_connection.clone();
         let win_weak_conn = window.downgrade();
+        let banner_connect = banner.clone();
         connect_btn.connect_clicked(move |_| match get_conn_connect() {
             Ok((conn, pass)) => {
+                banner_connect.set_revealed(false);
                 if let Some(win) = win_weak_conn.upgrade() {
                     win.close();
                 }
                 on_connect_clone(conn, pass);
             }
             Err(e) => {
-                eprintln!("Quick Connect validation error: {}", e);
+                banner_connect.set_title(&e);
+                banner_connect.set_revealed(true);
             }
         });
 
         // Save & Connect
         let on_save_connect = Rc::new(on_save_connect);
         let win_weak_save = window.downgrade();
+        let banner_save = banner.clone();
         save_connect_btn.connect_clicked(move |_| match get_connection() {
             Ok((conn, pass)) => {
+                banner_save.set_revealed(false);
                 if let Some(win) = win_weak_save.upgrade() {
                     win.close();
                 }
                 on_save_connect(conn, pass);
             }
             Err(e) => {
-                eprintln!("Quick Connect validation error: {}", e);
+                banner_save.set_title(&e);
+                banner_save.set_revealed(true);
             }
         });
 

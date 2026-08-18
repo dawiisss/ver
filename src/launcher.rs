@@ -257,6 +257,19 @@ pub fn build_ssh_args(conn: &Connection) -> Vec<String> {
     build_ssh_args_with_identity(conn, None)
 }
 
+fn shell_escape(arg: &str) -> String {
+    if arg.is_empty() {
+        "''".to_string()
+    } else if arg
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '/' | ':' | '@' | '='))
+    {
+        arg.to_string()
+    } else {
+        format!("'{}'", arg.replace('\'', "'\\''"))
+    }
+}
+
 /// Construct a configured `std::process::Command` for launching a specific terminal emulator.
 pub fn build_terminal_command(
     term_name: &str,
@@ -271,7 +284,11 @@ pub fn build_terminal_command(
             cmd.arg("--").args(&ssh_args);
         }
         "kgx" => {
-            let ssh_str = ssh_args.join(" ");
+            let ssh_str = ssh_args
+                .iter()
+                .map(|s| shell_escape(s))
+                .collect::<Vec<_>>()
+                .join(" ");
             cmd.arg("-e").arg(ssh_str);
         }
         _ => {
@@ -522,11 +539,12 @@ pub fn launch_vnc(conn: &Connection, password: Option<&str>) -> Result<Child, St
         .spawn()
         .map_err(|e| format!("Failed to spawn vncviewer process: {}", e))?;
 
-    // Clean up password file after viewer has had time to read it
+    // Clean up password file after viewer has had time to read it, ensuring deletion even on slow startup
     if let Some(path) = temp_file_path {
         std::thread::spawn(move || {
-            std::thread::sleep(std::time::Duration::from_secs(3));
-            let _ = std::fs::remove_file(path);
+            // Give vncviewer initial time to read the file, then remove
+            std::thread::sleep(std::time::Duration::from_secs(5));
+            let _ = std::fs::remove_file(&path);
         });
     }
 

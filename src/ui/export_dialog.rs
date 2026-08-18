@@ -119,6 +119,9 @@ impl ExportDialog {
             .child(&clamp)
             .build();
 
+        let banner = adw::Banner::builder().revealed(false).build();
+        toolbar_view.add_top_bar(&banner);
+
         toolbar_view.set_content(Some(&scrolled));
         window.set_content(Some(&toolbar_view));
 
@@ -146,6 +149,7 @@ impl ExportDialog {
             let list_box = list_box.clone();
             let export_btn = export_btn.clone();
             let format_combo = format_combo.clone();
+            let banner = banner.clone();
 
             move || {
                 while let Some(child) = list_box.first_child() {
@@ -156,48 +160,39 @@ impl ExportDialog {
                 let is_rdp_format = format_combo.selected() == 1;
                 let mut checked_count = 0;
 
+                if is_rdp_format {
+                    banner
+                        .set_title("Microsoft RDP format exports the first selected RDP profile.");
+                    banner.set_revealed(true);
+                } else {
+                    banner.set_revealed(false);
+                }
+
                 for cand in items.iter() {
                     if is_rdp_format && cand.connection.protocol != Protocol::Rdp {
                         continue;
                     }
 
-                    let is_checked = *cand.selected.borrow();
-                    if is_checked {
-                        checked_count += 1;
-                    }
-
-                    let subtitle = if cand.connection.username.is_empty() {
-                        format!(
-                            "{}:{} [{}]",
-                            cand.connection.host, cand.connection.port, cand.connection.group
-                        )
-                    } else {
-                        format!(
-                            "{}@{}:{} [{}]",
-                            cand.connection.username,
-                            cand.connection.host,
-                            cand.connection.port,
-                            cand.connection.group
-                        )
-                    };
-
                     let row = adw::ActionRow::builder()
                         .title(&cand.connection.name)
-                        .subtitle(subtitle)
+                        .subtitle(format!(
+                            "{}@{} ({})",
+                            cand.connection.username,
+                            cand.connection.host,
+                            cand.connection.protocol
+                        ))
                         .build();
 
                     let check = gtk::CheckButton::builder()
-                        .active(is_checked)
-                        .valign(gtk::Align::Center)
+                        .active(*cand.selected.borrow())
                         .build();
 
-                    let selected_rc = cand.selected.clone();
+                    let selected_flag = cand.selected.clone();
                     let export_btn_clone = export_btn.clone();
-                    let candidates_clone = candidates.clone();
                     let format_combo_clone = format_combo.clone();
-
+                    let candidates_clone = candidates.clone();
                     check.connect_toggled(move |btn| {
-                        *selected_rc.borrow_mut() = btn.is_active();
+                        *selected_flag.borrow_mut() = btn.is_active();
                         let is_rdp = format_combo_clone.selected() == 1;
                         let count = candidates_clone
                             .borrow()
@@ -207,16 +202,21 @@ impl ExportDialog {
                                     && *c.selected.borrow()
                             })
                             .count();
-                        export_btn_clone.set_label(&format!("Export Selected ({})...", count));
                         export_btn_clone.set_sensitive(count > 0);
+                        export_btn_clone.set_label(&format!("Export Selected ({})", count));
                     });
 
+                    if *cand.selected.borrow() {
+                        checked_count += 1;
+                    }
+
                     row.add_prefix(&check);
+                    row.set_activatable_widget(Some(&check));
                     list_box.append(&row);
                 }
 
-                export_btn.set_label(&format!("Export Selected ({})...", checked_count));
                 export_btn.set_sensitive(checked_count > 0);
+                export_btn.set_label(&format!("Export Selected ({})", checked_count));
             }
         };
 
@@ -224,125 +224,132 @@ impl ExportDialog {
 
         // React to Format changes
         {
-            let refresh_for_format = refresh_list.clone();
+            let refresh = refresh_list.clone();
             format_combo.connect_selected_notify(move |_| {
-                refresh_for_format();
+                refresh();
             });
         }
 
-        // Select All / Deselect All Handlers
-        let candidates_sa = candidates.clone();
-        let refresh_sa = refresh_list.clone();
-        let format_combo_sa = format_combo.clone();
-        select_all_btn.connect_clicked(move |_| {
-            let is_rdp = format_combo_sa.selected() == 1;
-            for c in candidates_sa.borrow().iter() {
-                if !is_rdp || c.connection.protocol == Protocol::Rdp {
+        // Select All / Deselect All
+        {
+            let candidates = candidates.clone();
+            let refresh = refresh_list.clone();
+            select_all_btn.connect_clicked(move |_| {
+                for c in candidates.borrow_mut().iter_mut() {
                     *c.selected.borrow_mut() = true;
                 }
-            }
-            refresh_sa();
-        });
+                refresh();
+            });
+        }
 
-        let candidates_da = candidates.clone();
-        let refresh_da = refresh_list.clone();
-        deselect_all_btn.connect_clicked(move |_| {
-            for c in candidates_da.borrow().iter() {
-                *c.selected.borrow_mut() = false;
-            }
-            refresh_da();
-        });
+        {
+            let candidates = candidates.clone();
+            let refresh = refresh_list.clone();
+            deselect_all_btn.connect_clicked(move |_| {
+                for c in candidates.borrow_mut().iter_mut() {
+                    *c.selected.borrow_mut() = false;
+                }
+                refresh();
+            });
+        }
 
         // Cancel
-        let win_cancel = window.downgrade();
-        cancel_btn.connect_clicked(move |_| {
-            if let Some(win) = win_cancel.upgrade() {
+        {
+            let win = window.clone();
+            cancel_btn.connect_clicked(move |_| {
                 win.close();
-            }
-        });
+            });
+        }
 
-        // Export Button Handler
-        let candidates_export = candidates.clone();
-        let win_export = window.clone();
-        let format_combo_export = format_combo.clone();
+        // Export Action
+        {
+            let win_export = window.clone();
+            let format_combo_export = format_combo.clone();
+            let candidates_export = candidates.clone();
+            let banner_export = banner.clone();
 
-        export_btn.connect_clicked(move |_| {
-            let is_rdp_format = format_combo_export.selected() == 1;
-            let target_conns: Vec<Connection> = candidates_export
-                .borrow()
-                .iter()
-                .filter(|c| {
-                    (!is_rdp_format || c.connection.protocol == Protocol::Rdp)
-                        && *c.selected.borrow()
-                })
-                .map(|c| c.connection.clone())
-                .collect();
+            export_btn.connect_clicked(move |_| {
+                let is_rdp_format = format_combo_export.selected() == 1;
+                let target_conns: Vec<Connection> = candidates_export
+                    .borrow()
+                    .iter()
+                    .filter(|c| {
+                        (!is_rdp_format || c.connection.protocol == Protocol::Rdp)
+                            && *c.selected.borrow()
+                    })
+                    .map(|c| c.connection.clone())
+                    .collect();
 
-            if target_conns.is_empty() {
-                return;
-            }
+                if target_conns.is_empty() {
+                    return;
+                }
 
-            let (suggested_name, filter_name, filter_pattern) = if is_rdp_format {
-                let name = target_conns
-                    .first()
-                    .map(|c| format!("{}.rdp", c.name))
-                    .unwrap_or_else(|| "connection.rdp".to_string());
-                (name, "RDP Configuration Files (*.rdp)", "*.rdp")
-            } else {
-                (
-                    "ver_backup.json".to_string(),
-                    "JSON Files (*.json)",
-                    "*.json",
-                )
-            };
+                let (suggested_name, filter_name, filter_pattern) = if is_rdp_format {
+                    let name = target_conns
+                        .first()
+                        .map(|c| format!("{}.rdp", c.name))
+                        .unwrap_or_else(|| "connection.rdp".to_string());
+                    (name, "RDP Configuration Files (*.rdp)", "*.rdp")
+                } else {
+                    (
+                        "ver_backup.json".to_string(),
+                        "JSON Files (*.json)",
+                        "*.json",
+                    )
+                };
 
-            let save_dialog = gtk::FileChooserNative::new(
-                Some("Save Exported Connections"),
-                Some(&win_export),
-                gtk::FileChooserAction::Save,
-                Some("Save"),
-                Some("Cancel"),
-            );
+                let save_dialog = gtk::FileChooserNative::new(
+                    Some("Save Exported Connections"),
+                    Some(&win_export),
+                    gtk::FileChooserAction::Save,
+                    Some("Save"),
+                    Some("Cancel"),
+                );
 
-            save_dialog.set_current_name(&suggested_name);
-            let filter = gtk::FileFilter::new();
-            filter.set_name(Some(filter_name));
-            filter.add_pattern(filter_pattern);
-            save_dialog.add_filter(&filter);
+                save_dialog.set_current_name(&suggested_name);
+                let filter = gtk::FileFilter::new();
+                filter.set_name(Some(filter_name));
+                filter.add_pattern(filter_pattern);
+                save_dialog.add_filter(&filter);
 
-            let conns_for_save = target_conns.clone();
-            let win_to_close = win_export.clone();
+                let conns_for_save = target_conns.clone();
+                let win_to_close = win_export.clone();
+                let banner_save = banner_export.clone();
 
-            save_dialog.connect_response(move |d, response| {
-                if response == gtk::ResponseType::Accept {
-                    if let Some(file) = d.file() {
-                        if let Some(path) = file.path() {
-                            let result = if is_rdp_format {
-                                if let Some(conn) = conns_for_save.first() {
-                                    let rdp_content = export_rdp_file(conn);
-                                    fs::write(&path, rdp_content).map_err(|e| e.to_string())
+                save_dialog.connect_response(move |d, response| {
+                    if response == gtk::ResponseType::Accept {
+                        if let Some(file) = d.file() {
+                            if let Some(path) = file.path() {
+                                let result = if is_rdp_format {
+                                    if let Some(conn) = conns_for_save.first() {
+                                        let rdp_content = export_rdp_file(conn);
+                                        fs::write(&path, rdp_content).map_err(|e| e.to_string())
+                                    } else {
+                                        Err("No connection selected to export as RDP".to_string())
+                                    }
                                 } else {
-                                    Err("No connection selected to export as RDP".to_string())
-                                }
-                            } else {
-                                match export_connections_json(&conns_for_save) {
-                                    Ok(json) => fs::write(&path, json).map_err(|e| e.to_string()),
-                                    Err(e) => Err(e.to_string()),
-                                }
-                            };
+                                    match export_connections_json(&conns_for_save) {
+                                        Ok(json) => {
+                                            fs::write(&path, json).map_err(|e| e.to_string())
+                                        }
+                                        Err(e) => Err(e.to_string()),
+                                    }
+                                };
 
-                            if let Err(e) = result {
-                                eprintln!("Failed to export: {}", e);
-                            } else {
-                                win_to_close.close();
+                                if let Err(e) = result {
+                                    banner_save.set_title(&format!("Export failed: {}", e));
+                                    banner_save.set_revealed(true);
+                                } else {
+                                    win_to_close.close();
+                                }
                             }
                         }
                     }
-                }
-            });
+                });
 
-            save_dialog.show();
-        });
+                save_dialog.show();
+            });
+        }
 
         window.present();
     }

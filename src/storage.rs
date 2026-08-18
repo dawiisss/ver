@@ -64,8 +64,11 @@ pub fn load_connections_from_path(path: &Path) -> Result<Vec<Connection>> {
     let bytes = match fs::read(path) {
         Ok(b) => b,
         Err(e) => {
-            eprintln!("Failed to read connections file at {:?}: {}", path, e);
-            return Ok(Vec::new());
+            if e.kind() == std::io::ErrorKind::NotFound {
+                return Ok(Vec::new());
+            }
+            return Err(e)
+                .with_context(|| format!("Failed to read connections file at {:?}", path));
         }
     };
     let content = match String::from_utf8(bytes) {
@@ -140,8 +143,10 @@ pub fn load_config_from_path(path: &Path) -> Result<AppConfig> {
     let bytes = match fs::read(path) {
         Ok(b) => b,
         Err(e) => {
-            eprintln!("Failed to read config file at {:?}: {}", path, e);
-            return Ok(AppConfig::default());
+            if e.kind() == std::io::ErrorKind::NotFound {
+                return Ok(AppConfig::default());
+            }
+            return Err(e).with_context(|| format!("Failed to read config file at {:?}", path));
         }
     };
     let content = match String::from_utf8(bytes) {

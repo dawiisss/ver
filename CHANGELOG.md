@@ -9,6 +9,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-08-18
+
+### Added
+- **Keyboard Accelerators & Shortcuts**:
+  - Added <kbd>Delete</kbd> accelerator in main window to trigger connection deletion with confirmation dialog.
+  - Added <kbd>F1</kbd> (Open Shortcuts Window) and <kbd>Ctrl+R</kbd> (Probe / Refresh) accelerator entries in the `GtkShortcutsWindow` cheat sheet.
+- **In-Dialog Visual Validation & Banners**:
+  - Added `adw::Banner` visual feedback in Quick Connect dialog for target format validation errors.
+  - Added `adw::Banner` in Export dialog displaying format requirements (e.g., RDP single-connection export) and surfacing file write error messages.
+- **Confirmation Prompts for Destructive Actions**:
+  - Added modal `adw::MessageDialog` confirmation prompts when deleting connections via the Connection Editor delete button or <kbd>Delete</kbd> key accelerator.
+- **Smart Port Preservation**:
+  - Added protocol default tracking in Connection Editor to only auto-update port numbers if matching the previous protocol's default, preserving custom configured ports (e.g., `2222`, `3390`).
+- **Thread Cancellation in Network Discovery**:
+  - Added `Arc<AtomicBool>` cancellation tokens in local network discovery worker threads to immediately terminate background subnet sweeps upon dialog dismissal or re-scan.
+- **Unit & Prober Test Coverage**:
+  - Added unit test suite in `src/prober.rs` validating `HostStatus` display methods and TCP stream probing.
+
+### Security
+- **Terminal Emulator Argument Shell Escaping**:
+  - Added safe POSIX argument escaping for single-command terminal launchers (e.g., `kgx` / GNOME Console via `-e`), preventing injection or argument splitting on paths with spaces or special characters.
+- **VNC Temporary Password Cleanup Hardening**:
+  - Enforced strict `0600` permissions on temporary VNC password files with asynchronous cleanup upon viewer process spawn.
+
+### Changed
+- **Prober Timeout Budgeting**:
+  - Updated TCP prober to calculate and distribute remaining timeout (`per_addr_timeout = timeout - elapsed`) across multi-IP resolved hosts, preventing total probe time from exceeding requested timeouts.
+- **Unified Host & Port Parsing**:
+  - Consolidated duplicate host/port parsing logic across RDP and Remmina importers into a shared, robust `parse_host_port` function in `src/importers/mod.rs` supporting IPv4, bracketed IPv6, and hostnames.
+
+### Fixed
+- **Storage Error Propagation & Surfacing**:
+  - Fixed `load_connections_from_path` and `load_config_from_path` to distinguish non-existent files (`ErrorKind::NotFound`) from permission or disk I/O errors (`EACCES`), propagating genuine errors instead of silently returning empty configurations.
+  - Added `adw::Toast` notifications in main window to surface storage save failures and keyring deletion errors.
+- **RDP File UTF-16 / BOM Decoding**:
+  - Implemented multi-encoding decoding (`decode_rdp_bytes`) supporting UTF-16LE/BE with BOM, UTF-8 with BOM, and standard Windows `mstsc` UTF-16 exports without BOM.
+- **OpenSSH Config Directive Precedence**:
+  - Fixed directive parsing in `src/importers/ssh_config.rs` to enforce OpenSSH's standard "first-match-wins" precedence rule so specific host directives are not overridden by wildcard sections.
+- **Test Assertion Coverage**:
+  - Fixed `tests/serde_test.rs` to assert deserialized field values explicitly instead of printing to stdout.
+
 ## [1.3.1] - 2026-08-17
 
 ### Changed

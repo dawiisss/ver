@@ -465,6 +465,7 @@ impl ConnectionEditor {
         page.add(&group_ssh);
 
         // Toggle Visibility based on Protocol
+        let last_proto_idx = std::rc::Rc::new(std::cell::RefCell::new(selected_proto_idx));
         let update_protocol_visibility = {
             let group_rdp = group_rdp.clone();
             let group_rdp_security = group_rdp_security.clone();
@@ -472,7 +473,20 @@ impl ConnectionEditor {
             let group_spice = group_spice.clone();
             let group_ssh = group_ssh.clone();
             let entry_port = entry_port.clone();
+            let last_proto_idx = last_proto_idx.clone();
             move |idx: u32, set_default_port: bool| {
+                let prev_idx = *last_proto_idx.borrow();
+                let prev_default_port = match prev_idx {
+                    0 | 4 => "3389",
+                    1 | 3 => "5900",
+                    _ => "22",
+                };
+                let new_default_port = match idx {
+                    0 | 4 => "3389",
+                    1 | 3 => "5900",
+                    _ => "22",
+                };
+
                 match idx {
                     0 | 4 => {
                         // RDP / XRDP
@@ -481,9 +495,6 @@ impl ConnectionEditor {
                         group_vnc.set_visible(false);
                         group_spice.set_visible(false);
                         group_ssh.set_visible(false);
-                        if set_default_port {
-                            entry_port.set_text("3389");
-                        }
                     }
                     1 => {
                         // VNC
@@ -492,9 +503,6 @@ impl ConnectionEditor {
                         group_vnc.set_visible(true);
                         group_spice.set_visible(false);
                         group_ssh.set_visible(false);
-                        if set_default_port {
-                            entry_port.set_text("5900");
-                        }
                     }
                     3 => {
                         // SPICE
@@ -503,9 +511,6 @@ impl ConnectionEditor {
                         group_vnc.set_visible(false);
                         group_spice.set_visible(true);
                         group_ssh.set_visible(false);
-                        if set_default_port {
-                            entry_port.set_text("5900");
-                        }
                     }
                     _ => {
                         // SSH
@@ -514,11 +519,16 @@ impl ConnectionEditor {
                         group_vnc.set_visible(false);
                         group_spice.set_visible(false);
                         group_ssh.set_visible(true);
-                        if set_default_port {
-                            entry_port.set_text("22");
-                        }
                     }
                 }
+
+                if set_default_port {
+                    let current_text = entry_port.text();
+                    if current_text.trim().is_empty() || current_text.trim() == prev_default_port {
+                        entry_port.set_text(new_default_port);
+                    }
+                }
+                *last_proto_idx.borrow_mut() = idx;
             }
         };
 
@@ -801,8 +811,39 @@ impl ConnectionEditor {
         });
 
         let del_id = conn.id.clone();
+        let del_name = conn.name.clone();
+        let on_delete_rc = std::rc::Rc::new(on_delete);
+        let toast_overlay_del = toast_overlay.clone();
         btn_delete.connect_clicked(move |_| {
-            on_delete(del_id.clone());
+            let dialog = adw::MessageDialog::builder()
+                .heading("Delete Connection?")
+                .body(format!(
+                    "Are you sure you want to delete \"{}\"? This action cannot be undone.",
+                    del_name
+                ))
+                .build();
+            dialog.add_response("cancel", "Cancel");
+            dialog.add_response("delete", "Delete");
+            dialog.set_response_appearance("delete", adw::ResponseAppearance::Destructive);
+            dialog.set_default_response(Some("cancel"));
+            dialog.set_close_response("cancel");
+
+            let on_del = on_delete_rc.clone();
+            let id = del_id.clone();
+            dialog.connect_response(None, move |d, response| {
+                if response == "delete" {
+                    on_del(id.clone());
+                }
+                d.close();
+            });
+
+            if let Some(root_win) = toast_overlay_del
+                .root()
+                .and_then(|r| r.downcast::<gtk::Window>().ok())
+            {
+                dialog.set_transient_for(Some(&root_win));
+            }
+            dialog.present();
         });
 
         let mac_for_wake = entry_mac.clone();

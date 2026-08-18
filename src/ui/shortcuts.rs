@@ -61,6 +61,12 @@ const SHORTCUTS_UI: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
             </child>
             <child>
               <object class="GtkShortcutsShortcut">
+                <property name="title">Refresh Reachability (Alternative)</property>
+                <property name="accelerator">&lt;Ctrl&gt;r</property>
+              </object>
+            </child>
+            <child>
+              <object class="GtkShortcutsShortcut">
                 <property name="title">Quit VER</property>
                 <property name="accelerator">&lt;Ctrl&gt;q</property>
               </object>
@@ -86,6 +92,12 @@ const SHORTCUTS_UI: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
               <object class="GtkShortcutsShortcut">
                 <property name="title">Keyboard Shortcuts Cheat Sheet</property>
                 <property name="accelerator">&lt;Ctrl&gt;question</property>
+              </object>
+            </child>
+            <child>
+              <object class="GtkShortcutsShortcut">
+                <property name="title">Keyboard Shortcuts (Alternative)</property>
+                <property name="accelerator">F1</property>
               </object>
             </child>
           </object>

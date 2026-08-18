@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::importers::ImporterError;
+use crate::importers::{parse_host_port, ImporterError};
 use crate::models::{
     AdvancedSettings, Connection, Protocol, RdpCertHandling, RdpColorDepth, RdpSecurityProtocol,
 };
@@ -232,34 +232,4 @@ pub fn scan_remmina_profiles() -> Vec<(PathBuf, Result<Connection, ImporterError
     }
 
     results
-}
-
-fn parse_host_port(server: &str, default_port: u16) -> (String, u16) {
-    let trimmed = server.trim();
-    if trimmed.is_empty() {
-        return (String::new(), default_port);
-    }
-
-    if trimmed.starts_with('[') {
-        if let Some(close_idx) = trimmed.find(']') {
-            let host = trimmed[1..close_idx].to_string();
-            let remainder = &trimmed[close_idx + 1..];
-            if let Some(port_str) = remainder.strip_prefix(':') {
-                if let Ok(port) = port_str.parse::<u16>() {
-                    return (host, port);
-                }
-            }
-            return (host, default_port);
-        }
-    }
-
-    if let Some((h, p)) = trimmed.rsplit_once(':') {
-        if !h.contains(':') {
-            if let Ok(port) = p.parse::<u16>() {
-                return (h.to_string(), port);
-            }
-        }
-    }
-
-    (trimmed.to_string(), default_port)
 }

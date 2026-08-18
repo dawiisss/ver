@@ -117,15 +117,15 @@ pub fn import_ssh_config_content(content: &str) -> Result<Vec<Connection>, Impor
 }
 
 fn apply_ssh_directive(block: &mut SshHostBlock, key: &str, val: &str) {
-    if key.eq_ignore_ascii_case("HostName") {
+    if key.eq_ignore_ascii_case("HostName") && block.hostname.is_none() {
         block.hostname = Some(val.to_string());
-    } else if key.eq_ignore_ascii_case("User") {
+    } else if key.eq_ignore_ascii_case("User") && block.user.is_none() {
         block.user = Some(val.to_string());
-    } else if key.eq_ignore_ascii_case("Port") {
+    } else if key.eq_ignore_ascii_case("Port") && block.port.is_none() {
         if let Ok(p) = val.parse::<u16>() {
             block.port = Some(p);
         }
-    } else if key.eq_ignore_ascii_case("IdentityFile") {
+    } else if key.eq_ignore_ascii_case("IdentityFile") && block.identity_file.is_none() {
         block.identity_file = Some(val.to_string());
     }
 }

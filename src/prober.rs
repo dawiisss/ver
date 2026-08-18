@@ -71,7 +71,12 @@ pub fn probe_host_sync(host: &str, port: u16, timeout: Duration) -> HostStatus {
 
     let mut last_err = String::from("Connection timed out");
     for addr in socket_addrs {
-        match std::net::TcpStream::connect_timeout(&addr, timeout) {
+        let elapsed = start.elapsed();
+        if elapsed >= timeout {
+            break;
+        }
+        let per_addr_timeout = timeout - elapsed;
+        match std::net::TcpStream::connect_timeout(&addr, per_addr_timeout) {
             Ok(_) => {
                 let latency_ms = start.elapsed().as_millis().max(1) as u64;
                 return HostStatus::Online { latency_ms };
@@ -156,4 +161,59 @@ pub async fn probe_connections_batch(
         results.push(res);
     }
     results
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::net::TcpListener;
+
+    #[test]
+    fn test_host_status_methods() {
+        let online = HostStatus::Online { latency_ms: 15 };
+        assert!(online.is_online());
+        assert_eq!(online.status_icon_name(), "emblem-ok-symbolic");
+        assert_eq!(online.status_css_class(), "status-online");
+        assert_eq!(online.description(), "Online (15 ms)");
+
+        let offline = HostStatus::Offline {
+            reason: "Connection refused".to_string(),
+        };
+        assert!(!offline.is_online());
+        assert_eq!(offline.status_icon_name(), "emblem-important-symbolic");
+        assert_eq!(offline.status_css_class(), "status-offline");
+        assert_eq!(offline.description(), "Offline (Connection refused)");
+
+        let probing = HostStatus::Probing;
+        assert!(!probing.is_online());
+        assert_eq!(probing.status_icon_name(), "view-refresh-symbolic");
+        assert_eq!(probing.status_css_class(), "status-probing");
+        assert_eq!(probing.description(), "Checking reachability...");
+
+        let unknown = HostStatus::Unknown;
+        assert!(!unknown.is_online());
+        assert_eq!(unknown.status_icon_name(), "emblem-unreadable-symbolic");
+        assert_eq!(unknown.status_css_class(), "status-unknown");
+        assert_eq!(unknown.description(), "Not checked");
+    }
+
+    #[test]
+    fn test_probe_host_sync_empty() {
+        let status = probe_host_sync("", 22, Duration::from_millis(100));
+        assert!(!status.is_online());
+        if let HostStatus::Offline { reason } = status {
+            assert!(reason.contains("Empty hostname"));
+        } else {
+            panic!("Expected offline for empty hostname");
+        }
+    }
+
+    #[test]
+    fn test_probe_host_sync_listener() {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("Must bind test listener");
+        let port = listener.local_addr().unwrap().port();
+
+        let status = probe_host_sync("127.0.0.1", port, Duration::from_millis(500));
+        assert!(status.is_online());
+    }
 }
