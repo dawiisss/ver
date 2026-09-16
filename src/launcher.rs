@@ -12,6 +12,8 @@ pub const TERMINAL_CANDIDATES: &[&str] = &[
     "gnome-terminal",
     "konsole",
     "alacritty",
+    "foot",
+    "wezterm",
     "xterm",
 ];
 
@@ -291,8 +293,11 @@ pub fn build_terminal_command(
                 .join(" ");
             cmd.arg("-e").arg(ssh_str);
         }
+        "wezterm" => {
+            cmd.arg("start").arg("--").args(&ssh_args);
+        }
         _ => {
-            // konsole, alacritty, xterm and fallbacks
+            // konsole, alacritty, foot, xterm and fallbacks
             cmd.arg("-e").args(&ssh_args);
         }
     }
@@ -598,6 +603,7 @@ mod tests {
                 rdp_multimon: true,
                 rdp_fullscreen: true,
                 rdp_audio: true,
+                rdp_cert_handling: RdpCertHandling::Ignore,
                 ..Default::default()
             },
             ..Default::default()
@@ -744,6 +750,8 @@ mod tests {
                 "gnome-terminal",
                 "konsole",
                 "alacritty",
+                "foot",
+                "wezterm",
                 "xterm"
             ]
         );

@@ -1,6 +1,6 @@
 use ver::models::{AppConfig, Connection};
 use ver::ui::{
-    ConnectionEditor, DiscoveredService, DiscoveryDialog, MainWindow, PreferencesWindow,
+    ConnectionEditor, DiscoveredService, DiscoveryDialog, MainWindow,
 };
 
 #[test]
@@ -80,14 +80,14 @@ fn test_connection_editor_dirty_tracking() {
 #[test]
 fn test_preferences_window_theme_selection() {
     let config = AppConfig::default();
-    let mut pref_win = PreferencesWindow::new(config);
-    assert_eq!(pref_win.config.theme, "default");
+    let mut main_win = MainWindow::new(vec![], config);
+    assert_eq!(main_win.config.theme, "default");
 
-    pref_win.set_theme("dark");
-    assert_eq!(pref_win.config.theme, "dark");
+    main_win.set_theme("dark");
+    assert_eq!(main_win.config.theme, "dark");
 
-    pref_win.set_theme("light");
-    assert_eq!(pref_win.config.theme, "light");
+    main_win.set_theme("light");
+    assert_eq!(main_win.config.theme, "light");
 }
 
 #[test]

@@ -12,11 +12,11 @@ pub struct VerTray {
 
 impl Tray for VerTray {
     fn id(&self) -> String {
-        "com.example.ver".into()
+        "io.github.dawiisss.ver".into()
     }
 
     fn icon_name(&self) -> String {
-        "com.example.ver".into()
+        "io.github.dawiisss.ver".into()
     }
 
     fn title(&self) -> String {

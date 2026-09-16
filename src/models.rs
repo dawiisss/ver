@@ -40,7 +40,7 @@ impl std::fmt::Display for Protocol {
     }
 }
 
-/// VNC display scaling modes.
+/// RDP color depth and graphics pipeline modes for FreeRDP.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum RdpColorDepth {
     #[serde(rename = "Auto (Default)")]
@@ -123,8 +123,8 @@ pub enum RdpNetworkProfile {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum RdpCertHandling {
-    #[default]
     Ignore,
+    #[default]
     Tofu,
     Deny,
     Ask,
@@ -249,7 +249,7 @@ impl Default for AdvancedSettings {
             clipboard_sharing: false,
             color_depth: 0,
             rdp_color_depth: RdpColorDepth::Automatic,
-            rdp_cert_handling: RdpCertHandling::Ignore,
+            rdp_cert_handling: RdpCertHandling::Tofu,
             rdp_security: RdpSecurityProtocol::Auto,
             vnc_fullscreen: false,
             vnc_clipboard: true,

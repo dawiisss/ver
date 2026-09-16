@@ -14,7 +14,7 @@ set -eo pipefail
 # --- Configuration & Constants ---
 REPO="dawiisss/ver"
 APP_NAME="ver"
-DESKTOP_ID="com.example.ver"
+DESKTOP_ID="io.github.dawiisss.ver"
 DEFAULT_GITHUB_API="https://api.github.com/repos/${REPO}"
 DEFAULT_GITHUB_URL="https://github.com/${REPO}"
 

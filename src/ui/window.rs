@@ -7,13 +7,11 @@ use libadwaita::prelude::*;
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
 use std::rc::Rc;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 use crate::importers::{merge_imported_connections, ImportConflictStrategy};
-use crate::launcher;
-use crate::models::{AppConfig, Connection, Protocol};
+use crate::models::{AppConfig, Connection};
 use crate::network;
 use crate::prober::{self, HostStatus};
 use crate::secrets;
@@ -24,16 +22,12 @@ use crate::ui::export_dialog::ExportDialog;
 use crate::ui::import_dialog::ImportDialog;
 use crate::ui::preferences::{apply_theme, PreferencesWindow};
 use crate::ui::quick_connect::QuickConnectDialog;
+use crate::ui::session::{self, ActiveSession};
 use crate::ui::shortcuts::ShortcutsDialog;
-
-#[derive(Clone)]
-pub struct ActiveSession {
-    pub conn_id: String,
-    pub conn_name: String,
-    pub child: Arc<Mutex<Option<std::process::Child>>>,
-    pub log_buffer: gtk::TextBuffer,
-    pub is_running: Arc<AtomicBool>,
-}
+use crate::ui::sidebar::{
+    create_connection_row, set_row_status_dot, setup_filtering, setup_group_headers,
+    setup_sorting, STATUS_DOT_CSS,
+};
 
 pub struct AppWindowState {
     pub connections: Vec<Connection>,
@@ -109,28 +103,7 @@ impl MainWindow {
     ) -> adw::ApplicationWindow {
         // Load custom CSS for reachability status dots
         let css_provider = gtk::CssProvider::new();
-        css_provider.load_from_data(
-            "
-            .status-dot {
-                min-width: 8px;
-                min-height: 8px;
-                border-radius: 9999px;
-                margin-right: 6px;
-            }
-            .status-online {
-                background-color: #2ec27e;
-            }
-            .status-offline {
-                background-color: #e01b24;
-            }
-            .status-probing {
-                background-color: #f6d32d;
-            }
-            .status-unknown {
-                background-color: #9a9996;
-            }
-            ",
-        );
+        css_provider.load_from_data(STATUS_DOT_CSS);
         if let Some(display) = gdk::Display::default() {
             gtk::style_context_add_provider_for_display(
                 &display,
@@ -317,62 +290,7 @@ impl MainWindow {
         // Helper to create a ListBoxRow for a connection with status dot and protocol icon
         let state_for_row = state.clone();
         let create_row = move |conn: &Connection| -> gtk::ListBoxRow {
-            let row = gtk::ListBoxRow::new();
-            row.set_widget_name(&conn.id);
-
-            let icon_name = match conn.protocol {
-                Protocol::Rdp | Protocol::Xrdp => "video-display-symbolic",
-                Protocol::Vnc => "computer-symbolic",
-                Protocol::Ssh => "utilities-terminal-symbolic",
-                Protocol::Spice => "video-display-symbolic",
-            };
-
-            let subtitle = if conn.username.is_empty() {
-                conn.host.clone()
-            } else {
-                format!("{}@{}", conn.username, conn.host)
-            };
-
-            let action_row = adw::ActionRow::builder()
-                .title(&conn.name)
-                .subtitle(subtitle)
-                .build();
-
-            // Prefix container with Status Dot and Protocol Icon
-            let prefix_box = gtk::Box::new(gtk::Orientation::Horizontal, 6);
-            prefix_box.set_valign(gtk::Align::Center);
-
-            let status_dot = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-            status_dot.set_valign(gtk::Align::Center);
-            status_dot.set_widget_name("status_dot");
-
-            let current_status = state_for_row
-                .borrow()
-                .host_statuses
-                .get(&conn.id)
-                .cloned()
-                .unwrap_or(HostStatus::Unknown);
-
-            status_dot.set_css_classes(&["status-dot", current_status.status_css_class()]);
-            status_dot.set_tooltip_text(Some(&current_status.description()));
-
-            let icon = gtk::Image::from_icon_name(icon_name);
-
-            prefix_box.append(&status_dot);
-            prefix_box.append(&icon);
-            action_row.add_prefix(&prefix_box);
-
-            let active_badge = gtk::Label::builder()
-                .label("Active")
-                .css_classes(vec!["success", "pill", "caption"])
-                .valign(gtk::Align::Center)
-                .visible(false)
-                .build();
-            active_badge.set_widget_name("active_badge");
-            action_row.add_suffix(&active_badge);
-
-            row.set_child(Some(&action_row));
-            row
+            create_connection_row(conn, state_for_row.clone())
         };
 
         // Populate initial connection rows
@@ -385,19 +303,13 @@ impl MainWindow {
         }
 
         // Group Header Func
-        self::setup_group_headers(&list_box, state.clone());
+        setup_group_headers(&list_box, state.clone());
 
         // Sort Func (Group ASC -> Name ASC)
-        self::setup_sorting(&list_box, state.clone());
+        setup_sorting(&list_box, state.clone());
 
         // Filter Func
-        self::setup_filtering(&list_box, &search_entry, state.clone());
-
-        // External Session Tracker Container
-        enum ExternalSessionEvent {
-            Log(String),
-            Exit(bool),
-        }
+        setup_filtering(&list_box, &search_entry, state.clone());
 
         let show_external_session = {
             let container = external_session_container.clone();
@@ -405,286 +317,31 @@ impl MainWindow {
             let state_for_show = state.clone();
             let list_box_for_show = list_box.clone();
             Rc::new(move |conn_id: &str| {
-                let session_opt = state_for_show
-                    .borrow()
-                    .active_sessions
-                    .get(conn_id)
-                    .cloned();
-                if let Some(session) = session_opt {
-                    while let Some(c) = container.first_child() {
-                        container.remove(&c);
-                    }
-
-                    let title = gtk::Label::builder()
-                        .label(format!("External Session Active: {}", session.conn_name))
-                        .css_classes(vec!["title-2"])
-                        .margin_top(48)
-                        .margin_bottom(12)
-                        .build();
-
-                    let button_box = gtk::Box::builder()
-                        .orientation(gtk::Orientation::Horizontal)
-                        .spacing(12)
-                        .halign(gtk::Align::Center)
-                        .margin_bottom(24)
-                        .build();
-
-                    let btn_disconnect = gtk::Button::builder()
-                        .label("Disconnect")
-                        .css_classes(vec!["destructive-action", "pill"])
-                        .build();
-
-                    let btn_view_settings = gtk::Button::builder()
-                        .label("View Settings")
-                        .css_classes(vec!["flat", "pill"])
-                        .build();
-
-                    button_box.append(&btn_disconnect);
-                    button_box.append(&btn_view_settings);
-
-                    let log_view = gtk::TextView::builder()
-                        .buffer(&session.log_buffer)
-                        .editable(false)
-                        .cursor_visible(false)
-                        .monospace(true)
-                        .css_classes(vec!["card", "view"])
-                        .left_margin(12)
-                        .right_margin(12)
-                        .top_margin(12)
-                        .bottom_margin(12)
-                        .wrap_mode(gtk::WrapMode::WordChar)
-                        .build();
-
-                    let scroll = gtk::ScrolledWindow::builder()
-                        .child(&log_view)
-                        .vexpand(true)
-                        .hexpand(true)
-                        .min_content_height(300)
-                        .margin_start(24)
-                        .margin_end(24)
-                        .margin_bottom(24)
-                        .build();
-
-                    let child_arc = session.child.clone();
-                    let is_running = session.is_running.clone();
-                    let stack_for_btn = stack.clone();
-                    let state_for_btn = state_for_show.clone();
-                    let list_box_for_btn = list_box_for_show.clone();
-                    let id_for_btn = conn_id.to_string();
-
-                    btn_disconnect.connect_clicked(move |_| {
-                        is_running.store(false, Ordering::SeqCst);
-                        let mut opt = child_arc.lock().unwrap();
-                        if let Some(mut c) = opt.take() {
-                            std::thread::spawn(move || {
-                                #[cfg(unix)]
-                                {
-                                    let pid = c.id();
-                                    unsafe {
-                                        libc::kill(-(pid as i32), libc::SIGTERM);
-                                    }
-                                }
-
-                                let mut exited = false;
-                                for _ in 0..20 {
-                                    if let Ok(Some(_)) = c.try_wait() {
-                                        exited = true;
-                                        break;
-                                    }
-                                    std::thread::sleep(std::time::Duration::from_millis(100));
-                                }
-
-                                if !exited {
-                                    #[cfg(unix)]
-                                    {
-                                        let pid = c.id();
-                                        unsafe {
-                                            libc::kill(-(pid as i32), libc::SIGKILL);
-                                        }
-                                    }
-                                    let _ = c.kill();
-                                    let _ = c.wait();
-                                }
-                            });
-                        }
-                        state_for_btn
-                            .borrow_mut()
-                            .active_sessions
-                            .remove(&id_for_btn);
-                        set_row_active_badge(&list_box_for_btn, &id_for_btn, false);
-                        stack_for_btn.set_visible_child_name("editor");
-                    });
-
-                    let stack_for_settings = stack.clone();
-                    btn_view_settings.connect_clicked(move |_| {
-                        stack_for_settings.set_visible_child_name("editor");
-                    });
-
-                    container.append(&title);
-                    container.append(&button_box);
-                    container.append(&scroll);
-                    stack.set_visible_child_name("external_session");
-                }
-            })
-        };
-
-        let track_external_session = {
-            let state_for_track = state.clone();
-            let list_box_for_track = list_box.clone();
-            let show_session_for_track = show_external_session.clone();
-            let stack_for_track = content_stack.clone();
-            Rc::new(move |mut child: std::process::Child, conn: Connection| {
-                let conn_id = conn.id.clone();
-                let conn_name = conn.name.clone();
-                let log_buffer = gtk::TextBuffer::new(None);
-                let is_running = Arc::new(AtomicBool::new(true));
-
-                let stdout_pipe = child.stdout.take();
-                let stderr_pipe = child.stderr.take();
-                let child_arc = Arc::new(Mutex::new(Some(child)));
-
-                let active_session = ActiveSession {
-                    conn_id: conn_id.clone(),
-                    conn_name: conn_name.clone(),
-                    child: child_arc.clone(),
-                    log_buffer: log_buffer.clone(),
-                    is_running: is_running.clone(),
-                };
-
-                state_for_track
-                    .borrow_mut()
-                    .active_sessions
-                    .insert(conn_id.clone(), active_session);
-
-                set_row_active_badge(&list_box_for_track, &conn_id, true);
-
-                let (tx, rx) = async_channel::unbounded::<ExternalSessionEvent>();
-
-                let tx_out = tx.clone();
-                if let Some(stdout) = stdout_pipe {
-                    std::thread::spawn(move || {
-                        use std::io::{BufRead, BufReader};
-                        let reader = BufReader::new(stdout);
-                        for l in reader.lines().map_while(Result::ok) {
-                            let _ = tx_out.send_blocking(ExternalSessionEvent::Log(l));
-                        }
-                    });
-                }
-
-                let tx_err = tx.clone();
-                if let Some(stderr) = stderr_pipe {
-                    std::thread::spawn(move || {
-                        use std::io::{BufRead, BufReader};
-                        let reader = BufReader::new(stderr);
-                        for l in reader.lines().map_while(Result::ok) {
-                            let _ = tx_err.send_blocking(ExternalSessionEvent::Log(l));
-                        }
-                    });
-                }
-
-                let child_arc_for_wait = child_arc.clone();
-                let is_running_for_wait = is_running.clone();
-                let tx_exit = tx.clone();
-
-                std::thread::spawn(move || loop {
-                    std::thread::sleep(std::time::Duration::from_millis(500));
-                    let mut opt = child_arc_for_wait.lock().unwrap();
-                    if let Some(ref mut c) = *opt {
-                        if let Ok(Some(status)) = c.try_wait() {
-                            let success = status.success();
-                            is_running_for_wait.store(false, Ordering::SeqCst);
-                            let _ = tx_exit.send_blocking(ExternalSessionEvent::Exit(success));
-                            break;
-                        }
-                    } else {
-                        is_running_for_wait.store(false, Ordering::SeqCst);
-                        break;
-                    }
-                });
-
-                let buffer = log_buffer.clone();
-                let list_box_for_exit = list_box_for_track.clone();
-                let state_for_exit = state_for_track.clone();
-                let stack_for_exit = stack_for_track.clone();
-                let conn_id_for_exit = conn_id.clone();
-
-                gtk::glib::MainContext::default().spawn_local(async move {
-                    while let Ok(event) = rx.recv().await {
-                        match event {
-                            ExternalSessionEvent::Log(msg) => {
-                                let mut iter = buffer.end_iter();
-                                buffer.insert(&mut iter, &format!("{}\n", msg));
-                            }
-                            ExternalSessionEvent::Exit(success) => {
-                                state_for_exit
-                                    .borrow_mut()
-                                    .active_sessions
-                                    .remove(&conn_id_for_exit);
-                                set_row_active_badge(&list_box_for_exit, &conn_id_for_exit, false);
-
-                                let is_currently_selected = state_for_exit
-                                    .borrow()
-                                    .selected_id
-                                    .as_ref()
-                                    .map(|id| id == &conn_id_for_exit)
-                                    .unwrap_or(false);
-
-                                if is_currently_selected && success {
-                                    stack_for_exit.set_visible_child_name("editor");
-                                }
-                            }
-                        }
-                    }
-                });
-
-                show_session_for_track(&conn_id);
+                session::show_external_session(
+                    &container,
+                    &stack,
+                    state_for_show.clone(),
+                    &list_box_for_show,
+                    conn_id,
+                );
             })
         };
 
         let state_for_launch = state.clone();
         let toast_overlay_for_launch = toast_overlay.clone();
-        let track_session_for_launch = track_external_session.clone();
+        let list_box_for_launch = list_box.clone();
+        let stack_for_launch = content_stack.clone();
+        let container_for_launch = external_session_container.clone();
         let launch_session = Rc::new(move |conn: Connection, pass: String| {
-            state_for_launch.borrow_mut().config.last_connected_id = Some(conn.id.clone());
-            let _ = storage::save_config(&state_for_launch.borrow().config);
-
-            let launch_result = match conn.protocol {
-                Protocol::Rdp | Protocol::Xrdp => {
-                    let pass_opt = if pass.is_empty() {
-                        None
-                    } else {
-                        Some(pass.as_str())
-                    };
-                    crate::launcher::launch_rdp(&conn, pass_opt)
-                }
-                Protocol::Ssh => launcher::launch_ssh(&conn),
-                Protocol::Spice => {
-                    let pass_opt = if pass.is_empty() {
-                        None
-                    } else {
-                        Some(pass.as_str())
-                    };
-                    launcher::launch_spice(&conn, pass_opt)
-                }
-                Protocol::Vnc => {
-                    let pass_opt = if pass.is_empty() {
-                        None
-                    } else {
-                        Some(pass.as_str())
-                    };
-                    launcher::launch_vnc(&conn, pass_opt)
-                }
-            };
-
-            match launch_result {
-                Ok(child) => {
-                    track_session_for_launch(child, conn);
-                }
-                Err(err) => {
-                    toast_overlay_for_launch
-                        .add_toast(adw::Toast::new(&format!("Connection failed: {}", err)));
-                }
-            }
+            session::launch_session(
+                conn,
+                pass,
+                state_for_launch.clone(),
+                &toast_overlay_for_launch,
+                &list_box_for_launch,
+                &stack_for_launch,
+                &container_for_launch,
+            );
         });
 
         // Background Batch Reachability Prober
@@ -1363,7 +1020,10 @@ impl MainWindow {
                                     .build();
                                 dialog.add_response("cancel", "Cancel");
                                 dialog.add_response("delete", "Delete");
-                                dialog.set_response_appearance("delete", adw::ResponseAppearance::Destructive);
+                                dialog.set_response_appearance(
+                                    "delete",
+                                    adw::ResponseAppearance::Destructive,
+                                );
                                 dialog.set_default_response(Some("cancel"));
                                 dialog.set_close_response("cancel");
 
@@ -1376,9 +1036,17 @@ impl MainWindow {
 
                                 dialog.connect_response(None, move |d, response| {
                                     if response == "delete" {
-                                        state_del.borrow_mut().connections.retain(|c| c.id != del_id);
-                                        if let Err(e) = storage::save_connections(&state_del.borrow().connections) {
-                                            toast_del.add_toast(adw::Toast::new(&format!("Failed to save connections: {}", e)));
+                                        state_del
+                                            .borrow_mut()
+                                            .connections
+                                            .retain(|c| c.id != del_id);
+                                        if let Err(e) = storage::save_connections(
+                                            &state_del.borrow().connections,
+                                        ) {
+                                            toast_del.add_toast(adw::Toast::new(&format!(
+                                                "Failed to save connections: {}",
+                                                e
+                                            )));
                                         }
                                         let _ = secrets::delete_password_sync(&del_id);
                                         list_box_del.remove(&sel_row_del);
@@ -1456,172 +1124,5 @@ impl MainWindow {
         }
 
         window
-    }
-}
-
-fn setup_group_headers(list_box: &gtk::ListBox, state: Rc<RefCell<AppWindowState>>) {
-    list_box.set_header_func(move |row, before| {
-        let st = state.borrow();
-        let conn = st
-            .connections
-            .iter()
-            .find(|c| c.id == row.widget_name().as_str());
-        let before_conn = before.and_then(|b| {
-            st.connections
-                .iter()
-                .find(|c| c.id == b.widget_name().as_str())
-                .cloned()
-        });
-
-        let current_group = conn.map(|c| c.group.as_str()).unwrap_or("Default");
-        let prev_group = before_conn.as_ref().map(|c| c.group.as_str());
-
-        if prev_group != Some(current_group) {
-            let label = gtk::Label::builder()
-                .label(current_group)
-                .xalign(0.0)
-                .css_classes(vec!["heading", "dim-label"])
-                .margin_top(12)
-                .margin_bottom(4)
-                .margin_start(12)
-                .margin_end(12)
-                .build();
-            row.set_header(Some(&label));
-        } else {
-            row.set_header(None::<&gtk::Widget>);
-        }
-    });
-}
-
-fn setup_sorting(list_box: &gtk::ListBox, state: Rc<RefCell<AppWindowState>>) {
-    list_box.set_sort_func(move |row1, row2| {
-        let st = state.borrow();
-        let c1 = st
-            .connections
-            .iter()
-            .find(|c| c.id == row1.widget_name().as_str());
-        let c2 = st
-            .connections
-            .iter()
-            .find(|c| c.id == row2.widget_name().as_str());
-
-        match (c1, c2) {
-            (Some(a), Some(b)) => {
-                let group_cmp = a.group.to_lowercase().cmp(&b.group.to_lowercase());
-                if group_cmp != std::cmp::Ordering::Equal {
-                    group_cmp.into()
-                } else {
-                    a.name.to_lowercase().cmp(&b.name.to_lowercase()).into()
-                }
-            }
-            _ => std::cmp::Ordering::Equal.into(),
-        }
-    });
-}
-
-fn setup_filtering(
-    list_box: &gtk::ListBox,
-    search_entry: &gtk::SearchEntry,
-    state: Rc<RefCell<AppWindowState>>,
-) {
-    let state_for_filter = state.clone();
-    list_box.set_filter_func(move |row| {
-        let st = state_for_filter.borrow();
-        let query = st.search_query.trim().to_lowercase();
-        if query.is_empty() {
-            return true;
-        }
-
-        if let Some(c) = st
-            .connections
-            .iter()
-            .find(|c| c.id == row.widget_name().as_str())
-        {
-            c.name.to_lowercase().contains(&query)
-                || c.host.to_lowercase().contains(&query)
-                || c.group.to_lowercase().contains(&query)
-                || c.username.to_lowercase().contains(&query)
-                || c.protocol.as_str().contains(&query)
-        } else {
-            false
-        }
-    });
-
-    let list_box_clone = list_box.clone();
-    search_entry.connect_search_changed(move |entry| {
-        state.borrow_mut().search_query = entry.text().to_string();
-        list_box_clone.invalidate_filter();
-        list_box_clone.invalidate_headers();
-    });
-}
-
-fn find_and_set_badge(widget: &gtk::Widget, is_active: bool) -> bool {
-    if widget.widget_name() == "active_badge" {
-        widget.set_visible(is_active);
-        return true;
-    }
-    let mut child = widget.first_child();
-    while let Some(c) = child {
-        if find_and_set_badge(&c, is_active) {
-            return true;
-        }
-        child = c.next_sibling();
-    }
-    false
-}
-
-fn set_row_active_badge(list_box: &gtk::ListBox, conn_id: &str, is_active: bool) {
-    let mut child_opt = list_box.first_child();
-    while let Some(child) = child_opt {
-        if let Ok(row) = child.clone().downcast::<gtk::ListBoxRow>() {
-            if row.widget_name() == conn_id {
-                let mut next_w = row.first_child();
-                while let Some(w) = next_w {
-                    if find_and_set_badge(&w, is_active) {
-                        return;
-                    }
-                    next_w = w.next_sibling();
-                }
-                break;
-            }
-        }
-        child_opt = child.next_sibling();
-    }
-}
-
-fn find_and_set_status_dot(widget: &gtk::Widget, status: &HostStatus) -> bool {
-    if widget.widget_name() == "status_dot" {
-        if let Ok(b) = widget.clone().downcast::<gtk::Box>() {
-            b.set_css_classes(&["status-dot", status.status_css_class()]);
-            b.set_tooltip_text(Some(&status.description()));
-            return true;
-        }
-    }
-    let mut child = widget.first_child();
-    while let Some(c) = child {
-        if find_and_set_status_dot(&c, status) {
-            return true;
-        }
-        child = c.next_sibling();
-    }
-    false
-}
-
-fn set_row_status_dot(list_box: &gtk::ListBox, conn_id: &str, status: &HostStatus) {
-    let mut child_opt = list_box.first_child();
-    while let Some(child) = child_opt {
-        if let Ok(row) = child.clone().downcast::<gtk::ListBoxRow>() {
-            if row.widget_name() == conn_id {
-                let mut next_w = row.first_child();
-                while let Some(w) = next_w {
-                    if find_and_set_status_dot(&w, status) {
-                        return;
-                    }
-                    next_w = w.next_sibling();
-                }
-                break;
-            }
-        }
-        child_opt = child.next_sibling();
     }
 }

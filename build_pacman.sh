@@ -18,8 +18,8 @@ mkdir -p "$PKG_DIR/usr/share/applications"
 mkdir -p "$PKG_DIR/usr/share/pixmaps"
 
 cp target/release/ver "$PKG_DIR/usr/bin/ver"
-cp data/com.example.ver.desktop "$PKG_DIR/usr/share/applications/"
-cp data/com.example.ver.png "$PKG_DIR/usr/share/pixmaps/"
+cp data/io.github.dawiisss.ver.desktop "$PKG_DIR/usr/share/applications/"
+cp data/io.github.dawiisss.ver.png "$PKG_DIR/usr/share/pixmaps/"
 
 SIZE=$(du -sb "$PKG_DIR/usr" | awk '{print $1}')
 BUILD_DATE=$(date +%s)

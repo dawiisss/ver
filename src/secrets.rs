@@ -124,8 +124,7 @@ static SHARED_RUNTIME: OnceLock<tokio::runtime::Runtime> = OnceLock::new();
 
 fn get_shared_runtime() -> &'static tokio::runtime::Runtime {
     SHARED_RUNTIME.get_or_init(|| {
-        tokio::runtime::Builder::new_multi_thread()
-            .worker_threads(1)
+        tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .thread_name("ver-keyring-runtime")
             .build()

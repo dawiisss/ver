@@ -6,10 +6,10 @@ use ver::{load_config, load_connections, ui::apply_theme, ui::MainWindow};
 
 fn main() {
     libadwaita::init().expect("Failed to initialize Libadwaita");
-    gtk::Window::set_default_icon_name("com.example.ver");
+    gtk::Window::set_default_icon_name("io.github.dawiisss.ver");
 
     let app = libadwaita::Application::builder()
-        .application_id("com.example.ver")
+        .application_id("io.github.dawiisss.ver")
         .build();
 
     let (tx, rx) = async_channel::unbounded();

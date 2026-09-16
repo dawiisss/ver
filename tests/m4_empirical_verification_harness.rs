@@ -159,6 +159,12 @@ fn test_terminal_emulator_path_resolution_and_stdio_flags() {
                 assert_eq!(args[0], "-e");
                 assert_eq!(args[1], "ssh alice@test.server.org");
             }
+            "wezterm" => {
+                assert_eq!(args[0], "start");
+                assert_eq!(args[1], "--");
+                assert_eq!(args[2], "ssh");
+                assert_eq!(args[3], "alice@test.server.org");
+            }
             _ => {
                 assert_eq!(args[0], "-e");
                 assert_eq!(args[1], "ssh");

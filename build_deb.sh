@@ -18,8 +18,8 @@ mkdir -p "$PACKAGE_NAME/usr/share/pixmaps"
 mkdir -p "$PACKAGE_NAME/DEBIAN"
 
 cp target/release/ver "$PACKAGE_NAME/usr/bin/ver"
-cp data/com.example.ver.desktop "$PACKAGE_NAME/usr/share/applications/"
-cp data/com.example.ver.png "$PACKAGE_NAME/usr/share/pixmaps/"
+cp data/io.github.dawiisss.ver.desktop "$PACKAGE_NAME/usr/share/applications/"
+cp data/io.github.dawiisss.ver.png "$PACKAGE_NAME/usr/share/pixmaps/"
 
 cat << CTRL_EOF > "$PACKAGE_NAME/DEBIAN/control"
 Package: ver

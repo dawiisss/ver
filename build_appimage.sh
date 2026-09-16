@@ -17,8 +17,8 @@ mkdir -p AppDir/usr/share/applications
 mkdir -p AppDir/usr/share/pixmaps
 
 cp target/release/ver AppDir/usr/bin/ver
-cp data/com.example.ver.desktop AppDir/usr/share/applications/
-cp data/com.example.ver.png AppDir/usr/share/pixmaps/
+cp data/io.github.dawiisss.ver.desktop AppDir/usr/share/applications/
+cp data/io.github.dawiisss.ver.png AppDir/usr/share/pixmaps/
 
 # AppRun script
 cat << 'EOF' > AppDir/AppRun
@@ -30,8 +30,8 @@ EOF
 chmod +x AppDir/AppRun
 
 # Top-level desktop file and icon required by AppImage
-cp data/com.example.ver.desktop AppDir/
-cp data/com.example.ver.png AppDir/
+cp data/io.github.dawiisss.ver.desktop AppDir/
+cp data/io.github.dawiisss.ver.png AppDir/
 
 echo "Downloading appimagetool if missing..."
 if [ ! -f "appimagetool" ]; then

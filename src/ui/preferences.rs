@@ -22,20 +22,9 @@ pub fn apply_theme(theme_str: &str) {
     });
 }
 
-pub struct PreferencesWindow {
-    pub config: AppConfig,
-}
+pub struct PreferencesWindow;
 
 impl PreferencesWindow {
-    pub fn new(config: AppConfig) -> Self {
-        Self { config }
-    }
-
-    pub fn set_theme(&mut self, theme: &str) {
-        self.config.theme = theme.to_string();
-        apply_theme(theme);
-    }
-
     pub fn build_window(
         parent: Option<&impl IsA<gtk::Window>>,
         config: Rc<RefCell<AppConfig>>,

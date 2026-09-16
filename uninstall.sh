@@ -13,7 +13,7 @@ set -eo pipefail
 
 # --- Configuration & Constants ---
 APP_NAME="ver"
-DESKTOP_ID="com.example.ver"
+DESKTOP_ID="io.github.dawiisss.ver"
 
 # --- Formatting Helpers ---
 if [ -t 1 ]; then
