@@ -80,7 +80,8 @@ wget -qO- https://raw.githubusercontent.com/dawiisss/ver/main/install.sh | bash
 
 ### Local Network & Service Discovery (<kbd>Ctrl+D</kbd>)
 * **Subnet Scanning**: Automatically probes your local network interfaces and subnets for active RDP (3389), VNC (5900), and SSH (22) services.
-* **One-Click Import**: Quickly add discovered network machines directly into your connection inventory.
+* **Smart Deduplication**: Automatically detects and hides machines already added to your connections list (matching host, port, protocol, and localhost equivalents) so only new, unconfigured services appear.
+* **One-Click Import**: Quickly add discovered network machines directly into your connection inventory, immediately removing them from the discovered section.
 
 ### Multi-Protocol Support
 * **RDP & XRDP**: Powered by `xfreerdp3` with support for dynamic resolution, multimon, audio redirection, clipboard sharing, gateway servers, shared folders, security protocol negotiation (NLA, TLS, RDP, ExtNLA), and certificate verification policies (TOFU, Strict Deny, Ignore).
@@ -92,12 +93,13 @@ wget -qO- https://raw.githubusercontent.com/dawiisss/ver/main/install.sh | bash
 * **RDP Stdin Credential Hardening**: Passwords are piped over standard input via `xfreerdp3 /from-stdin:force`, eliminating credential exposure in `/proc/<pid>/cmdline` and process monitoring utilities (`ps`, `top`).
 * **Secret Service Keyring Integration**: Securely store connection passwords in your native system keyring (`gnome-keyring`, `kwallet`, `keepassxc`) via the Freedesktop Secret Service API (`oo7`).
 * **Configuration Hardening**: Strict `0700` Unix directory permissions on all user configuration paths (`~/.config/ver`).
-* **Clean Process Group Signaling**: Process group signal termination (`-(pid as i32)`) ensures child shells, SSH sessions, and terminal wrappers exit cleanly without orphaned processes.
+* **Safe Process Group Signaling**: Process group signal termination (`-(pid as i32)`) with PID validity and liveness guards ensures child shells, SSH sessions, and terminal wrappers exit cleanly without orphan processes or accidental self-termination.
+* **Corrupt File Auto-Recovery & User Alerting**: Automatic timestamped backup creation for non-UTF8 or malformed configuration files with proactive GUI warning notifications preventing accidental data loss.
 
 ### Active Session Tracking & System Tray
 * **Live Session Badges**: Real-time "Active" sidebar indicators showing currently connected sessions.
 * **Session Logs**: Embedded log view streaming live process output and connection events.
-* **System Tray Indicator**: Background StatusNotifierItem tray icon for quick window toggle and persistent daemon mode.
+* **System Tray Indicator**: Background StatusNotifierItem tray icon with embedded in-memory ARGB32 pixmap and theme fallback for quick window toggle and persistent daemon mode.
 
 ### Blazing Fast & Memory Efficient
 * **Minimal Memory Footprint**: Pure native compiled Rust architecture with GTK4/Libadwaita consumes negligible RAM (typically ~20–35 MB baseline).
@@ -149,7 +151,7 @@ Installs the binary to `/usr/local/bin/ver` and desktop launchers to `/usr/local
 #### Install Options & Version Pinning:
 ```bash
 # Install a specific release version
-curl -fsSL https://raw.githubusercontent.com/dawiisss/ver/main/install.sh | bash -s -- --version v1.4.0
+curl -fsSL https://raw.githubusercontent.com/dawiisss/ver/main/install.sh | bash -s -- --version v1.5.0
 
 # Install to a custom prefix directory
 ./install.sh --prefix /opt/ver
@@ -190,7 +192,7 @@ Ensure the backend tools for your required protocols are installed on your syste
 | Protocol | Backend Package / Binary | Example Package Names |
 | :--- | :--- | :--- |
 | **RDP / XRDP** | `xfreerdp3` | `freerdp3`, `freerdp3-x11` |
-| **VNC** | `vncviewer` | `tigervnc`, `tigervnc-viewer` |
+| **VNC** | `vncviewer`, `vncpasswd` | `tigervnc`, `tigervnc-viewer` |
 | **SPICE** | `remote-viewer` | `virt-viewer` |
 | **SSH** | Native Terminal Emulator | `ptyxis`, `gnome-terminal`, `konsole`, `alacritty`, `foot`, `wezterm`, `xterm` |
 

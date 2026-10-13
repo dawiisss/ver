@@ -25,5 +25,5 @@ pub use secrets::{
 pub use storage::{
     get_config_dir, get_config_file_path, get_connections_file_path, load_config,
     load_config_from_path, load_connections, load_connections_from_path, save_config,
-    save_config_to_path, save_connections, save_connections_to_path,
+    save_config_to_path, save_connections, save_connections_to_path, was_corrupt_backup_created,
 };

@@ -42,10 +42,10 @@ pub fn import_ssh_config_content(content: &str) -> Result<Vec<Connection>, Impor
             let aliases: Vec<String> = val
                 .split_whitespace()
                 .map(|s| s.trim().to_string())
-                .filter(|s| !s.is_empty())
+                .filter(|s| !s.is_empty() && !s.contains('*') && !s.contains('?'))
                 .collect();
 
-            if aliases.is_empty() || aliases.iter().any(|a| a == "*") {
+            if aliases.is_empty() {
                 current_block = None;
             } else {
                 current_block = Some(SshHostBlock {

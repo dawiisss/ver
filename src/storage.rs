@@ -41,7 +41,17 @@ pub fn to_json_4spaces<T: Serialize + ?Sized>(data: &T) -> Result<String> {
     Ok(json_str)
 }
 
+use std::sync::atomic::{AtomicBool, Ordering};
+
+static CORRUPT_BACKUP_CREATED: AtomicBool = AtomicBool::new(false);
+
+/// Returns true if a corrupt configuration file was detected and backed up during this session.
+pub fn was_corrupt_backup_created() -> bool {
+    CORRUPT_BACKUP_CREATED.load(Ordering::SeqCst)
+}
+
 fn backup_corrupt_file(path: &Path) {
+    CORRUPT_BACKUP_CREATED.store(true, Ordering::SeqCst);
     let timestamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_millis())

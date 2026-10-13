@@ -22,8 +22,20 @@ pub fn find_binary_in_path(binary_name: &str) -> Option<PathBuf> {
     let path_os = env::var_os("PATH")?;
     for dir in env::split_paths(&path_os) {
         let candidate = dir.join(binary_name);
-        if candidate.is_file() {
-            return Some(candidate);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            if let Ok(meta) = candidate.metadata() {
+                if meta.is_file() && (meta.permissions().mode() & 0o111 != 0) {
+                    return Some(candidate);
+                }
+            }
+        }
+        #[cfg(not(unix))]
+        {
+            if candidate.is_file() {
+                return Some(candidate);
+            }
         }
     }
     None
@@ -41,18 +53,14 @@ pub fn detect_terminal_emulator() -> Option<(&'static str, PathBuf)> {
 }
 
 /// Build command-line argument list for `xfreerdp3` based on connection parameters.
-pub fn build_rdp_args(conn: &Connection, password: Option<&str>) -> Vec<String> {
+/// Security Notice: Passwords must NEVER be passed in command line arguments (argv); FreeRDP
+/// credentials must be piped via standard input with `/from-stdin:force` to prevent exposure in `ps`/`/proc`.
+pub fn build_rdp_args(conn: &Connection, _password: Option<&str>) -> Vec<String> {
     let port = conn.resolve_port();
     let mut args = vec![format!("/v:{}:{}", conn.host, port)];
 
     if !conn.username.trim().is_empty() {
         args.push(format!("/u:{}", conn.username.trim()));
-    }
-
-    if let Some(pass) = password {
-        if !pass.is_empty() {
-            args.push(format!("/p:{}", pass));
-        }
     }
 
     if !conn.advanced_settings.rdp_domain.trim().is_empty() {
@@ -483,6 +491,10 @@ pub fn launch_vnc(conn: &Connection, password: Option<&str>) -> Result<Child, St
     let mut temp_file_path = None;
 
     if let Some(pass) = password.filter(|p| !p.is_empty()) {
+        if find_binary_in_path("vncpasswd").is_none() {
+            return Err("The 'vncpasswd' tool is required for VNC password authentication but was not found on PATH.".to_string());
+        }
+
         // Use vncpasswd -f to encrypt the password
         let mut vncpasswd = Command::new("vncpasswd")
             .arg("-f")
@@ -524,6 +536,8 @@ pub fn launch_vnc(conn: &Connection, password: Option<&str>) -> Result<Child, St
                     }
                 }
             }
+        } else {
+            return Err("vncpasswd failed to generate obfuscated password".to_string());
         }
     }
 
@@ -544,11 +558,19 @@ pub fn launch_vnc(conn: &Connection, password: Option<&str>) -> Result<Child, St
         .spawn()
         .map_err(|e| format!("Failed to spawn vncviewer process: {}", e))?;
 
-    // Clean up password file after viewer has had time to read it, ensuring deletion even on slow startup
+    // Clean up temporary password file once vncviewer has started and read it, or immediately if vncviewer exits
     if let Some(path) = temp_file_path {
+        let child_pid = child.id();
         std::thread::spawn(move || {
-            // Give vncviewer initial time to read the file, then remove
-            std::thread::sleep(std::time::Duration::from_secs(5));
+            for _ in 0..20 {
+                std::thread::sleep(std::time::Duration::from_millis(500));
+                #[cfg(unix)]
+                unsafe {
+                    if child_pid > 0 && libc::kill(child_pid as i32, 0) != 0 {
+                        break;
+                    }
+                }
+            }
             let _ = std::fs::remove_file(&path);
         });
     }
@@ -613,7 +635,8 @@ mod tests {
 
         assert!(args.contains(&"/v:rdp.example.com:3389".to_string()));
         assert!(args.contains(&"/u:administrator".to_string()));
-        assert!(args.contains(&"/p:MySecretPass".to_string()));
+        // Security: Ensure password is never passed via argv
+        assert!(!args.iter().any(|a| a.starts_with("/p:")));
         assert!(args.contains(&"/cert:ignore".to_string()));
         assert!(args.contains(&"/dynamic-resolution".to_string()));
         assert!(args.contains(&"+clipboard".to_string()));
@@ -767,5 +790,22 @@ mod tests {
     fn test_launch_ssh_empty_host_validation() {
         let conn = Connection::default();
         assert!(launch_ssh(&conn).is_err());
+    }
+
+    #[test]
+    fn test_build_vnc_args() {
+        use crate::models::{VncColorLevel, VncEncodingOption};
+        let mut conn = Connection::new_with_protocol(Protocol::Vnc);
+        conn.name = "Test VNC".to_string();
+        conn.host = "192.168.1.100".to_string();
+        conn.port = 5900;
+        conn.advanced_settings.vnc_shared = true;
+        conn.advanced_settings.vnc_encoding = VncEncodingOption::Tight;
+        conn.advanced_settings.vnc_color_level = VncColorLevel::Full;
+
+        let args = build_vnc_args(&conn);
+        assert!(args.contains(&"-Shared".to_string()));
+        assert!(args.contains(&"-PreferredEncoding=Tight".to_string()));
+        assert!(args.contains(&"192.168.1.100:5900".to_string()));
     }
 }

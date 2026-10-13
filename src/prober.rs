@@ -53,13 +53,17 @@ pub fn probe_host_sync(host: &str, port: u16, timeout: Duration) -> HostStatus {
     let target = format!("{}:{}", host.trim(), port);
     let start = Instant::now();
 
-    // Resolve socket address with timeout
-    let socket_addrs: Vec<SocketAddr> = match target.to_socket_addrs() {
-        Ok(addrs) => addrs.collect(),
-        Err(e) => {
-            return HostStatus::Offline {
-                reason: format!("DNS lookup failed: {}", e),
-            };
+    // Fast path: If host is an IP address, parse directly without blocking libc getaddrinfo DNS resolution
+    let socket_addrs: Vec<SocketAddr> = if let Ok(ip) = host.trim().parse::<std::net::IpAddr>() {
+        vec![SocketAddr::new(ip, port)]
+    } else {
+        match target.to_socket_addrs() {
+            Ok(addrs) => addrs.collect(),
+            Err(e) => {
+                return HostStatus::Offline {
+                    reason: format!("DNS lookup failed: {}", e),
+                };
+            }
         }
     };
 

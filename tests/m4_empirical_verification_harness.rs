@@ -136,7 +136,8 @@ fn test_terminal_emulator_path_resolution_and_stdio_flags() {
     };
     let rdp_args = build_rdp_args(&rdp_conn, Some("secret"));
     assert!(rdp_args.contains(&"/v:192.168.1.100:3389".to_string()));
-    assert!(rdp_args.contains(&"/p:secret".to_string()));
+    // Security: Password must never be leaked via command-line arguments
+    assert!(!rdp_args.iter().any(|a| a.starts_with("/p:")));
 
     for &term in TERMINAL_CANDIDATES {
         let cmd = build_terminal_command(term, &conn, None);

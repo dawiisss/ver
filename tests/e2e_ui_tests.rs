@@ -109,6 +109,34 @@ fn test_discovery_dialog_add_services() {
 }
 
 #[test]
+fn test_discovery_dialog_filter_already_added() {
+    use ver::models::{Connection, Protocol};
+
+    let mut dialog = DiscoveryDialog::new();
+    dialog.add_service(DiscoveredService {
+        name: "Remote Mac".to_string(),
+        protocol: "vnc".to_string(),
+        host: "macbook.local".to_string(),
+        port: 5900,
+    });
+    dialog.add_service(DiscoveredService {
+        name: "Work Server".to_string(),
+        protocol: "ssh".to_string(),
+        host: "192.168.1.50".to_string(),
+        port: 22,
+    });
+
+    let mut existing_conn = Connection::new_with_protocol(Protocol::Vnc);
+    existing_conn.host = "macbook.local".to_string();
+    existing_conn.port = 5900;
+
+    let unadded = dialog.filter_unadded(&[existing_conn]);
+    assert_eq!(unadded.len(), 1);
+    assert_eq!(unadded[0].name, "Work Server");
+    assert_eq!(unadded[0].host, "192.168.1.50");
+}
+
+#[test]
 fn test_active_session_tracking() {
     use std::collections::HashMap;
     use std::sync::atomic::{AtomicBool, Ordering};

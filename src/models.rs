@@ -199,6 +199,8 @@ pub struct AdvancedSettings {
     #[serde(default)]
     pub vnc_quality_level: u8, // 0 for auto, 1-9 for force
     pub clipboard_sharing: bool,
+    /// Legacy field kept for backward compatibility with older configuration schemas.
+    #[serde(default)]
     pub color_depth: u8,
     #[serde(default)]
     pub rdp_color_depth: RdpColorDepth,
@@ -712,5 +714,16 @@ mod tests {
             deserialized.advanced_settings.ssh_identity_file,
             "/home/user/.ssh/id_ed25519"
         );
+    }
+
+    #[test]
+    fn test_serde_advanced_settings_defaults() {
+        let json = r#"{
+            "vnc_viewonly": false,
+            "vnc_clipboard": true
+        }"#;
+        let settings: AdvancedSettings = serde_json::from_str(json).unwrap();
+        assert!(!settings.vnc_viewonly);
+        assert!(settings.vnc_clipboard);
     }
 }

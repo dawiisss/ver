@@ -101,11 +101,13 @@ pub fn show_external_session(
             let mut opt = child_arc.lock().unwrap();
             if let Some(mut c) = opt.take() {
                 std::thread::spawn(move || {
+                    let pid = c.id();
                     #[cfg(unix)]
                     {
-                        let pid = c.id();
-                        unsafe {
-                            libc::kill(-(pid as i32), libc::SIGTERM);
+                        if pid > 1 && c.try_wait().ok().flatten().is_none() {
+                            unsafe {
+                                libc::kill(-(pid as i32), libc::SIGTERM);
+                            }
                         }
                     }
 
@@ -121,9 +123,10 @@ pub fn show_external_session(
                     if !exited {
                         #[cfg(unix)]
                         {
-                            let pid = c.id();
-                            unsafe {
-                                libc::kill(-(pid as i32), libc::SIGKILL);
+                            if pid > 1 && c.try_wait().ok().flatten().is_none() {
+                                unsafe {
+                                    libc::kill(-(pid as i32), libc::SIGKILL);
+                                }
                             }
                         }
                         let _ = c.kill();

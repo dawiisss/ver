@@ -7,7 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [Unreleased]
+## [1.5.0] - 2026-10-13
+
+### Security
+- **Credential Protection in FreeRDP**: Removed password injection into command-line arguments (`/p:<pass>`) in `build_rdp_args`, enforcing password transmission strictly via stdin pipe (`/from-stdin:force`) to prevent leakage in `/proc` and `ps` (CWE-214).
+- **VNC Temporary Password Cleanup & Validation**: Added availability verification for the `vncpasswd` tool and improved temporary password file cleanup to monitor client lifecycle instead of relying on an arbitrary 5-second sleep (CWE-377 / CWE-379).
+- **Safe Process Termination**: Guarded `libc::kill` process group signaling with PID sanity checks (`pid > 1`) and child liveness verification to prevent accidental self-termination or signaling recycled PIDs.
+
+### Added
+- **Deduplication in Network Discovery**: Discovered network devices (RDP, VNC, SSH) already present in the user's connection library (matching host, port, protocol, or loopback/localhost equivalents) are automatically filtered out from the Network Discovery dialog. Clicking "Add" immediately imports the connection and removes the row from the discovered section with dynamic summary reporting.
+
+### Fixed
+- **System Tray Startup Panic**: Gracefully handle missing StatusNotifierItem DBus service on minimal compositors and window managers without crashing on launch.
+- **Keyring Threading & Panic Safety**: Fixed Tokio runtime panic when invoking `get_password_sync` from `CurrentThread` runtimes; moved Secret Service operations on connection save/delete/duplicate to asynchronous GLib tasks to prevent freezing the GTK UI.
+- **Rust MSRV Compatibility**: Replaced `usize::is_multiple_of` with standard modulo arithmetic in RDP file decoder to restore full compatibility with Rust 1.75+.
+- **Executable Detection**: Enhanced `find_binary_in_path` to verify Unix executable permissions (`0o111`) rather than only file existence.
+- **Network Probing Latency**: Added fast-path IP address parsing in `probe_host_sync` to bypass blocking libc `getaddrinfo` lookups when probing numeric IP addresses.
+- **SSH Config Importer Wildcard Filtering**: Filter out pattern match directives containing `*` or `?` from imported connection aliases.
+- **Corrupt File Recovery Alerts**: Added UI toast notification on startup alerting the user if a corrupt connection file was detected and backed up, preventing silent data loss upon subsequent save.
+- **Missing Window and System Tray Icons**: Embedded 64x64 ARGB32 tray icon pixmap directly in `VerTray::icon_pixmap` over DBus so the tray indicator renders on all StatusNotifierItem hosts without requiring external disk assets. Added automatic icon caching to `~/.local/share/icons/hicolor` and `~/.local/share/pixmaps` on startup, registered GTK icon theme search paths, and explicitly set `.icon_name("io.github.dawiisss.ver")` on `ApplicationWindow` to eliminate broken window icon placeholders in the top-left corner.
+
+### Changed
+- **Model Cleanliness**: Maintained legacy `color_depth: u8` in `AdvancedSettings` with serde defaults for complete backward configuration compatibility while standardizing internal usage on `rdp_color_depth: RdpColorDepth`.
+- **Test Consolidation**: Consolidated scratch integration tests into unit test suites and removed redundant test files.
+- **Repository Hygiene**: Purged untracked precompiled binary distribution archives from the workspace.
 
 ## [1.4.0] - 2026-08-18
 

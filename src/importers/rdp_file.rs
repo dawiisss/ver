@@ -169,6 +169,7 @@ pub fn import_rdp_file(path: &Path) -> Result<Connection, ImporterError> {
     import_rdp_content(&content, filename)
 }
 
+#[allow(clippy::chunks_exact_to_as_chunks, clippy::manual_is_multiple_of)]
 fn decode_rdp_bytes(bytes: &[u8]) -> Result<String, ImporterError> {
     if bytes.len() >= 2 && bytes[0] == 0xFF && bytes[1] == 0xFE {
         // UTF-16LE with BOM
@@ -203,7 +204,7 @@ fn decode_rdp_bytes(bytes: &[u8]) -> Result<String, ImporterError> {
         Ok(s) => Ok(s),
         Err(_) => {
             // Check for UTF-16LE without BOM (common when alternating null bytes exist)
-            if bytes.len() >= 4 && bytes.len().is_multiple_of(2) && (bytes[1] == 0 || bytes[3] == 0)
+            if bytes.len() >= 4 && bytes.len() % 2 == 0 && (bytes[1] == 0 || bytes[3] == 0)
             {
                 let u16_slice: Vec<u16> = bytes
                     .chunks_exact(2)

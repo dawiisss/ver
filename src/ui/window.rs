@@ -16,7 +16,7 @@ use crate::network;
 use crate::prober::{self, HostStatus};
 use crate::secrets;
 use crate::storage;
-use crate::ui::discovery::DiscoveryDialog;
+use crate::ui::discovery::{DiscoveredService, DiscoveryDialog};
 use crate::ui::editor::ConnectionEditor;
 use crate::ui::export_dialog::ExportDialog;
 use crate::ui::import_dialog::ImportDialog;
@@ -274,9 +274,18 @@ impl MainWindow {
         let toast_overlay = adw::ToastOverlay::new();
         toast_overlay.set_child(Some(&main_box));
 
+        if storage::was_corrupt_backup_created() {
+            let toast = adw::Toast::new(
+                "Warning: Corrupt configuration file detected; backup created (.corrupt)",
+            );
+            toast.set_timeout(10);
+            toast_overlay.add_toast(toast);
+        }
+
         let window = adw::ApplicationWindow::builder()
             .application(app)
             .title("VER - Connection Manager")
+            .icon_name("io.github.dawiisss.ver")
             .default_width(900)
             .default_height(650)
             .content(&toast_overlay)
@@ -454,7 +463,11 @@ impl MainWindow {
                 move |conn, pass| {
                     let pass_str = pass.unwrap_or_default();
                     if !pass_str.is_empty() {
-                        let _ = secrets::set_password_sync(&conn.id, &pass_str);
+                        let conn_id = conn.id.clone();
+                        let pass_for_secret = pass_str.clone();
+                        glib::MainContext::default().spawn_local(async move {
+                            let _ = secrets::set_password(&conn_id, &pass_for_secret).await;
+                        });
                     }
                     state_save.borrow_mut().connections.push(conn.clone());
                     let _ = storage::save_connections(&state_save.borrow().connections);
@@ -590,8 +603,17 @@ impl MainWindow {
             let create_row_inner = create_row_disc.clone();
             let trigger_probe_inner = trigger_probe_disc.clone();
 
+            let state_for_check = state_inner.clone();
+            let is_already_added = move |service: &DiscoveredService| -> bool {
+                DiscoveryDialog::is_service_in_connections(
+                    service,
+                    &state_for_check.borrow().connections,
+                )
+            };
+
             let disc_window = DiscoveryDialog::build_window(
                 Some(&window_for_disc),
+                is_already_added,
                 move |new_conn: Connection| {
                     state_inner.borrow_mut().connections.push(new_conn.clone());
                     let _ = storage::save_connections(&state_inner.borrow().connections);
@@ -734,11 +756,14 @@ impl MainWindow {
                             )));
                         }
 
-                        if updated_pass.is_empty() {
-                            let _ = secrets::delete_password_sync(&updated_conn.id);
-                        } else {
-                            let _ = secrets::set_password_sync(&updated_conn.id, &updated_pass);
-                        }
+                        let id_for_secret = updated_conn.id.clone();
+                        glib::MainContext::default().spawn_local(async move {
+                            if updated_pass.is_empty() {
+                                let _ = secrets::delete_password(&id_for_secret).await;
+                            } else {
+                                let _ = secrets::set_password(&id_for_secret, &updated_pass).await;
+                            }
+                        });
 
                         if let Some(child) = row_on_save.child() {
                             if let Ok(action_row) = child.downcast::<adw::ActionRow>() {
@@ -778,7 +803,10 @@ impl MainWindow {
                         }
 
                         if !dup_pass.is_empty() {
-                            let _ = secrets::set_password_sync(&dup_conn.id, &dup_pass);
+                            let dup_id = dup_conn.id.clone();
+                            glib::MainContext::default().spawn_local(async move {
+                                let _ = secrets::set_password(&dup_id, &dup_pass).await;
+                            });
                         }
 
                         let new_row = create_row_on_dup(&dup_conn);
@@ -812,7 +840,10 @@ impl MainWindow {
                                 e
                             )));
                         }
-                        let _ = secrets::delete_password_sync(&del_id);
+                        let del_id_clone = del_id.clone();
+                        glib::MainContext::default().spawn_local(async move {
+                            let _ = secrets::delete_password(&del_id_clone).await;
+                        });
 
                         list_box_on_del.remove(&row_on_del);
                         list_box_on_del.unselect_all();
@@ -1048,7 +1079,10 @@ impl MainWindow {
                                                 e
                                             )));
                                         }
-                                        let _ = secrets::delete_password_sync(&del_id);
+                                        let del_id_clone = del_id.clone();
+                                        glib::MainContext::default().spawn_local(async move {
+                                            let _ = secrets::delete_password(&del_id_clone).await;
+                                        });
                                         list_box_del.remove(&sel_row_del);
                                         list_box_del.unselect_all();
                                         window_title_del.set_subtitle(&format!(

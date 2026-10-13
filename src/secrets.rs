@@ -124,7 +124,8 @@ static SHARED_RUNTIME: OnceLock<tokio::runtime::Runtime> = OnceLock::new();
 
 fn get_shared_runtime() -> &'static tokio::runtime::Runtime {
     SHARED_RUNTIME.get_or_init(|| {
-        tokio::runtime::Builder::new_current_thread()
+        tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(1)
             .enable_all()
             .thread_name("ver-keyring-runtime")
             .build()
@@ -132,56 +133,48 @@ fn get_shared_runtime() -> &'static tokio::runtime::Runtime {
     })
 }
 
-/// Synchronous wrapper around get_password for non-async contexts.
-pub fn get_password_sync(id: &str) -> Result<Option<String>> {
+fn run_sync<F, T>(future: F) -> Result<T>
+where
+    F: std::future::Future<Output = Result<T>> + Send + 'static,
+    T: Send + 'static,
+{
     if let Ok(handle) = tokio::runtime::Handle::try_current() {
         if handle.runtime_flavor() == tokio::runtime::RuntimeFlavor::CurrentThread {
-            let id = id.to_string();
-            std::thread::spawn(move || handle.block_on(get_password(&id)))
-                .join()
-                .unwrap_or_else(|_| Ok(None))
+            std::thread::spawn(move || {
+                let rt = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .context("Failed to build local runtime for secrets")?;
+                rt.block_on(future)
+            })
+            .join()
+            .map_err(|_| anyhow::anyhow!("Keyring worker thread panicked"))?
         } else {
-            tokio::task::block_in_place(|| handle.block_on(get_password(id)))
+            tokio::task::block_in_place(|| handle.block_on(future))
         }
     } else {
         let rt = get_shared_runtime();
-        rt.block_on(get_password(id))
+        rt.block_on(future)
     }
+}
+
+/// Synchronous wrapper around get_password for non-async contexts.
+pub fn get_password_sync(id: &str) -> Result<Option<String>> {
+    let id_owned = id.to_string();
+    run_sync(async move { get_password(&id_owned).await })
 }
 
 /// Synchronous wrapper around set_password for non-async contexts.
 pub fn set_password_sync(id: &str, password: &str) -> Result<()> {
-    if let Ok(handle) = tokio::runtime::Handle::try_current() {
-        if handle.runtime_flavor() == tokio::runtime::RuntimeFlavor::CurrentThread {
-            let id = id.to_string();
-            let password = password.to_string();
-            std::thread::spawn(move || handle.block_on(set_password(&id, &password)))
-                .join()
-                .unwrap_or_else(|_| Ok(()))
-        } else {
-            tokio::task::block_in_place(|| handle.block_on(set_password(id, password)))
-        }
-    } else {
-        let rt = get_shared_runtime();
-        rt.block_on(set_password(id, password))
-    }
+    let id_owned = id.to_string();
+    let pass_owned = password.to_string();
+    run_sync(async move { set_password(&id_owned, &pass_owned).await })
 }
 
 /// Synchronous wrapper around delete_password for non-async contexts.
 pub fn delete_password_sync(id: &str) -> Result<()> {
-    if let Ok(handle) = tokio::runtime::Handle::try_current() {
-        if handle.runtime_flavor() == tokio::runtime::RuntimeFlavor::CurrentThread {
-            let id = id.to_string();
-            std::thread::spawn(move || handle.block_on(delete_password(&id)))
-                .join()
-                .unwrap_or_else(|_| Ok(()))
-        } else {
-            tokio::task::block_in_place(|| handle.block_on(delete_password(id)))
-        }
-    } else {
-        let rt = get_shared_runtime();
-        rt.block_on(delete_password(id))
-    }
+    let id_owned = id.to_string();
+    run_sync(async move { delete_password(&id_owned).await })
 }
 
 #[cfg(test)]
