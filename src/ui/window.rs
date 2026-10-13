@@ -25,8 +25,8 @@ use crate::ui::quick_connect::QuickConnectDialog;
 use crate::ui::session::{self, ActiveSession};
 use crate::ui::shortcuts::ShortcutsDialog;
 use crate::ui::sidebar::{
-    create_connection_row, set_row_status_dot, setup_filtering, setup_group_headers,
-    setup_sorting, STATUS_DOT_CSS,
+    create_connection_row, set_row_status_dot, setup_filtering, setup_group_headers, setup_sorting,
+    STATUS_DOT_CSS,
 };
 
 pub struct AppWindowState {

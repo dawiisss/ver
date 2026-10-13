@@ -1,7 +1,5 @@
 use ver::models::{AppConfig, Connection};
-use ver::ui::{
-    ConnectionEditor, DiscoveredService, DiscoveryDialog, MainWindow,
-};
+use ver::ui::{ConnectionEditor, DiscoveredService, DiscoveryDialog, MainWindow};
 
 #[test]
 fn test_main_window_initialization_and_filtering() {

@@ -204,8 +204,7 @@ fn decode_rdp_bytes(bytes: &[u8]) -> Result<String, ImporterError> {
         Ok(s) => Ok(s),
         Err(_) => {
             // Check for UTF-16LE without BOM (common when alternating null bytes exist)
-            if bytes.len() >= 4 && bytes.len() % 2 == 0 && (bytes[1] == 0 || bytes[3] == 0)
-            {
+            if bytes.len() >= 4 && bytes.len() % 2 == 0 && (bytes[1] == 0 || bytes[3] == 0) {
                 let u16_slice: Vec<u16> = bytes
                     .chunks_exact(2)
                     .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]]))

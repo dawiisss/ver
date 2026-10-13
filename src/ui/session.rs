@@ -6,11 +6,11 @@ use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
+use super::sidebar::set_row_active_badge;
+use super::window::AppWindowState;
 use crate::launcher;
 use crate::models::{Connection, Protocol};
 use crate::storage;
-use super::sidebar::set_row_active_badge;
-use super::window::AppWindowState;
 
 #[derive(Clone)]
 pub struct ActiveSession {

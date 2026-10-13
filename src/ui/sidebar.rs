@@ -4,9 +4,9 @@ use libadwaita::prelude::*;
 use std::cell::RefCell;
 use std::rc::Rc;
 
+use super::window::AppWindowState;
 use crate::models::{Connection, Protocol};
 use crate::prober::HostStatus;
-use super::window::AppWindowState;
 
 pub const STATUS_DOT_CSS: &str = "
 .status-dot {

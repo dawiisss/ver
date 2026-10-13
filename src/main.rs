@@ -20,17 +20,26 @@ fn ensure_icons_installed() {
 
     let png_dest = dir_256.join("io.github.dawiisss.ver.png");
     if !png_dest.exists() {
-        let _ = std::fs::write(&png_dest, include_bytes!("../data/io.github.dawiisss.ver.png"));
+        let _ = std::fs::write(
+            &png_dest,
+            include_bytes!("../data/io.github.dawiisss.ver.png"),
+        );
     }
 
     let svg_dest = dir_scalable.join("io.github.dawiisss.ver.svg");
     if !svg_dest.exists() {
-        let _ = std::fs::write(&svg_dest, include_bytes!("../data/io.github.dawiisss.ver.svg"));
+        let _ = std::fs::write(
+            &svg_dest,
+            include_bytes!("../data/io.github.dawiisss.ver.svg"),
+        );
     }
 
     let pixmap_dest = dir_pixmaps.join("io.github.dawiisss.ver.png");
     if !pixmap_dest.exists() {
-        let _ = std::fs::write(&pixmap_dest, include_bytes!("../data/io.github.dawiisss.ver.png"));
+        let _ = std::fs::write(
+            &pixmap_dest,
+            include_bytes!("../data/io.github.dawiisss.ver.png"),
+        );
     }
 }
 

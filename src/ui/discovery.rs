@@ -46,10 +46,7 @@ impl DiscoveryDialog {
             .any(|conn| Self::matches_connection(service, conn))
     }
 
-    pub fn filter_unadded(
-        &self,
-        connections: &[Connection],
-    ) -> Vec<DiscoveredService> {
+    pub fn filter_unadded(&self, connections: &[Connection]) -> Vec<DiscoveredService> {
         self.discovered_services
             .iter()
             .filter(|s| !Self::is_service_in_connections(s, connections))
@@ -60,8 +57,7 @@ impl DiscoveryDialog {
     pub fn matches_connection(service: &DiscoveredService, conn: &Connection) -> bool {
         let (conn_host, conn_port) =
             crate::importers::parse_host_port(&conn.host, conn.resolve_port());
-        let (serv_host, serv_port) =
-            crate::importers::parse_host_port(&service.host, service.port);
+        let (serv_host, serv_port) = crate::importers::parse_host_port(&service.host, service.port);
 
         let network_match = Self::protocol_matches(conn.protocol, &service.protocol)
             && conn_port == serv_port
@@ -536,7 +532,10 @@ mod tests {
             port: 22,
         };
 
-        assert!(DiscoveryDialog::is_service_in_connections(&service, &[conn]));
+        assert!(DiscoveryDialog::is_service_in_connections(
+            &service,
+            &[conn]
+        ));
     }
 
     #[test]
@@ -552,7 +551,10 @@ mod tests {
             port: 3389,
         };
 
-        assert!(DiscoveryDialog::is_service_in_connections(&service, &[conn]));
+        assert!(DiscoveryDialog::is_service_in_connections(
+            &service,
+            &[conn]
+        ));
     }
 
     #[test]
@@ -568,7 +570,10 @@ mod tests {
             port: 5900,
         };
 
-        assert!(DiscoveryDialog::is_service_in_connections(&service, &[conn]));
+        assert!(DiscoveryDialog::is_service_in_connections(
+            &service,
+            &[conn]
+        ));
     }
 
     #[test]
