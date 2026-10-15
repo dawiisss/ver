@@ -169,7 +169,9 @@ impl ExportDialog {
                 }
 
                 for cand in items.iter() {
-                    if is_rdp_format && cand.connection.protocol != Protocol::Rdp {
+                    if is_rdp_format
+                        && !matches!(cand.connection.protocol, Protocol::Rdp | Protocol::Xrdp)
+                    {
                         continue;
                     }
 
@@ -181,6 +183,7 @@ impl ExportDialog {
                             cand.connection.host,
                             cand.connection.protocol
                         ))
+                        .use_markup(false)
                         .build();
 
                     let check = gtk::CheckButton::builder()
@@ -198,7 +201,11 @@ impl ExportDialog {
                             .borrow()
                             .iter()
                             .filter(|c| {
-                                (!is_rdp || c.connection.protocol == Protocol::Rdp)
+                                (!is_rdp
+                                    || matches!(
+                                        c.connection.protocol,
+                                        Protocol::Rdp | Protocol::Xrdp
+                                    ))
                                     && *c.selected.borrow()
                             })
                             .count();
@@ -274,7 +281,8 @@ impl ExportDialog {
                     .borrow()
                     .iter()
                     .filter(|c| {
-                        (!is_rdp_format || c.connection.protocol == Protocol::Rdp)
+                        (!is_rdp_format
+                            || matches!(c.connection.protocol, Protocol::Rdp | Protocol::Xrdp))
                             && *c.selected.borrow()
                     })
                     .map(|c| c.connection.clone())

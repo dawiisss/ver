@@ -207,6 +207,7 @@ impl ImportDialog {
                             cand.connection.port,
                             cand.source_desc
                         ))
+                        .use_markup(false)
                         .build();
 
                     let check = gtk::CheckButton::builder()

@@ -4,7 +4,8 @@ use std::path::Path;
 
 use crate::importers::{parse_host_port, ImporterError};
 use crate::models::{
-    AdvancedSettings, Connection, Protocol, RdpCertHandling, RdpColorDepth, RdpSecurityProtocol,
+    format_host_port, AdvancedSettings, Connection, Protocol, RdpCertHandling, RdpColorDepth,
+    RdpSecurityProtocol,
 };
 
 /// Parses an `.rdp` file content into a VER `Connection`.
@@ -256,7 +257,10 @@ pub fn export_rdp_file(conn: &Connection) -> String {
     };
 
     let mut lines = Vec::new();
-    lines.push(format!("full address:s:{}:{}", conn.host, conn.port));
+    lines.push(format!(
+        "full address:s:{}",
+        format_host_port(&conn.host, conn.port)
+    ));
     if !conn.username.is_empty() {
         lines.push(format!("username:s:{}", conn.username));
     }

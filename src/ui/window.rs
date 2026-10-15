@@ -26,7 +26,7 @@ use crate::ui::session::{self, ActiveSession};
 use crate::ui::shortcuts::ShortcutsDialog;
 use crate::ui::sidebar::{
     create_connection_row, set_row_status_dot, setup_filtering, setup_group_headers, setup_sorting,
-    STATUS_DOT_CSS,
+    update_connection_row, STATUS_DOT_CSS,
 };
 
 pub struct AppWindowState {
@@ -415,7 +415,9 @@ impl MainWindow {
             let create_row_inner = create_row_for_add.clone();
             Rc::new(move || {
                 let default_protocol = state.borrow().config.default_protocol;
-                let new_conn = Connection::new_with_protocol(default_protocol);
+                let mut new_conn = Connection::new_with_protocol(default_protocol);
+                new_conn.advanced_settings.vnc_color_level =
+                    state.borrow().config.default_vnc_color_level;
                 state.borrow_mut().connections.push(new_conn.clone());
                 let _ = storage::save_connections(&state.borrow().connections);
 
@@ -765,17 +767,26 @@ impl MainWindow {
                             }
                         });
 
-                        if let Some(child) = row_on_save.child() {
-                            if let Ok(action_row) = child.downcast::<adw::ActionRow>() {
-                                action_row.set_title(&updated_conn.name);
-                                let subtitle = if updated_conn.username.is_empty() {
-                                    updated_conn.host.clone()
-                                } else {
-                                    format!("{}@{}", updated_conn.username, updated_conn.host)
-                                };
-                                action_row.set_subtitle(&subtitle);
-                            }
-                        }
+                        update_connection_row(&row_on_save, &updated_conn);
+
+                        let host_probe = updated_conn.host.clone();
+                        let port_probe = updated_conn.resolve_port();
+                        let id_probe = updated_conn.id.clone();
+                        let state_probe = state_on_save.clone();
+                        let list_box_probe = list_box_on_save.clone();
+                        glib::MainContext::default().spawn_local(async move {
+                            let status = prober::probe_host_async(
+                                host_probe,
+                                port_probe,
+                                Duration::from_millis(1500),
+                            )
+                            .await;
+                            state_probe
+                                .borrow_mut()
+                                .host_statuses
+                                .insert(id_probe.clone(), status.clone());
+                            set_row_status_dot(&list_box_probe, &id_probe, &status);
+                        });
 
                         list_box_on_save.invalidate_sort();
                         list_box_on_save.invalidate_headers();
@@ -859,12 +870,12 @@ impl MainWindow {
                     let toast_on_wake = toast_overlay_for_select.clone();
                     let conn_for_wake = conn.clone();
 
-                    let on_wake = move |mac: String| {
+                    let on_wake = move |mac: String,
+                                        target_host: String,
+                                        target_port: u16,
+                                        target_name: String| {
                         let _ = network::send_wol(&mac);
-                        let target_host = conn_for_wake.host.clone();
-                        let target_port = conn_for_wake.port;
                         let target_id = conn_for_wake.id.clone();
-                        let target_name = conn_for_wake.name.clone();
 
                         let state_poll = state_on_wake.clone();
                         let list_box_poll = list_box_on_wake.clone();
@@ -1023,6 +1034,13 @@ impl MainWindow {
                     _ => {}
                 }
             } else {
+                let sidebar_has_focus = GtkWindowExt::focus(&window_key)
+                    .map(|w| {
+                        w == list_box_key.clone().upcast::<gtk::Widget>()
+                            || w.is_ancestor(&list_box_key)
+                    })
+                    .unwrap_or(false);
+
                 match keyval {
                     gdk::Key::F5 => {
                         probe_key();
@@ -1032,7 +1050,7 @@ impl MainWindow {
                         shortcuts_key();
                         return glib::Propagation::Stop;
                     }
-                    gdk::Key::Delete => {
+                    gdk::Key::Delete if sidebar_has_focus => {
                         if let Some(sel_row) = list_box_key.selected_row() {
                             let id = sel_row.widget_name().to_string();
                             let conn_opt = state_key
@@ -1100,7 +1118,7 @@ impl MainWindow {
                             }
                         }
                     }
-                    gdk::Key::Return => {
+                    gdk::Key::Return if sidebar_has_focus => {
                         if let Some(sel_row) = list_box_key.selected_row() {
                             let id = sel_row.widget_name().to_string();
                             let conn_opt = state_key

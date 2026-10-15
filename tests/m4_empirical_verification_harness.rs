@@ -121,12 +121,12 @@ fn test_terminal_emulator_path_resolution_and_stdio_flags() {
     };
 
     let default_ssh_args = build_ssh_args(&conn);
-    assert_eq!(default_ssh_args, vec!["ssh", "alice@test.server.org"]);
+    assert_eq!(default_ssh_args, vec!["ssh", "--", "alice@test.server.org"]);
 
     let id_ssh_args = build_ssh_args_with_identity(&conn, Some("/tmp/id_rsa"));
     assert_eq!(
         id_ssh_args,
-        vec!["ssh", "-i", "/tmp/id_rsa", "alice@test.server.org"]
+        vec!["ssh", "-i", "/tmp/id_rsa", "--", "alice@test.server.org"]
     );
 
     let rdp_conn = Connection {
@@ -154,22 +154,25 @@ fn test_terminal_emulator_path_resolution_and_stdio_flags() {
             "ptyxis" | "gnome-terminal" => {
                 assert_eq!(args[0], "--");
                 assert_eq!(args[1], "ssh");
-                assert_eq!(args[2], "alice@test.server.org");
+                assert_eq!(args[2], "--");
+                assert_eq!(args[3], "alice@test.server.org");
             }
             "kgx" => {
                 assert_eq!(args[0], "-e");
-                assert_eq!(args[1], "ssh alice@test.server.org");
+                assert_eq!(args[1], "ssh -- alice@test.server.org");
             }
             "wezterm" => {
                 assert_eq!(args[0], "start");
                 assert_eq!(args[1], "--");
                 assert_eq!(args[2], "ssh");
-                assert_eq!(args[3], "alice@test.server.org");
+                assert_eq!(args[3], "--");
+                assert_eq!(args[4], "alice@test.server.org");
             }
             _ => {
                 assert_eq!(args[0], "-e");
                 assert_eq!(args[1], "ssh");
-                assert_eq!(args[2], "alice@test.server.org");
+                assert_eq!(args[2], "--");
+                assert_eq!(args[3], "alice@test.server.org");
             }
         }
     }

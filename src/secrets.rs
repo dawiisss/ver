@@ -1,17 +1,31 @@
 use anyhow::{Context, Result};
 use oo7::Keyring;
 use std::collections::HashMap;
+use tokio::sync::OnceCell;
 
 pub const SERVICE_NAME: &str = "ver_remote_connection_manager";
 
+static CACHED_KEYRING: OnceCell<Option<Keyring>> = OnceCell::const_new();
+
+async fn get_cached_keyring() -> Option<&'static Keyring> {
+    CACHED_KEYRING
+        .get_or_init(|| async {
+            match Keyring::new().await {
+                Ok(k) => Some(k),
+                Err(e) => {
+                    eprintln!("Warning: Secret Service keyring unavailable: {}", e);
+                    None
+                }
+            }
+        })
+        .await
+        .as_ref()
+}
+
 /// Retrieves password for connection ID from Secret Service (oo7 keyring).
 pub async fn get_password(id: &str) -> Result<Option<String>> {
-    let keyring = match Keyring::new().await {
-        Ok(k) => k,
-        Err(e) => {
-            eprintln!("Warning: Secret Service keyring unavailable: {}", e);
-            return Ok(None);
-        }
+    let Some(keyring) = get_cached_keyring().await else {
+        return Ok(None);
     };
 
     // Primary search using "service" and "connection_id"
@@ -57,12 +71,8 @@ pub async fn get_password(id: &str) -> Result<Option<String>> {
 
 /// Stores password for connection ID in Secret Service (oo7 keyring).
 pub async fn set_password(id: &str, password: &str) -> Result<()> {
-    let keyring = match Keyring::new().await {
-        Ok(k) => k,
-        Err(e) => {
-            eprintln!("Warning: Secret Service keyring unavailable: {}", e);
-            return Ok(());
-        }
+    let Some(keyring) = get_cached_keyring().await else {
+        return Ok(());
     };
 
     let label = format!("VER Connection Password ({})", id);
@@ -86,9 +96,8 @@ pub async fn set_password(id: &str, password: &str) -> Result<()> {
 
 /// Deletes stored password for connection ID from Secret Service.
 pub async fn delete_password(id: &str) -> Result<()> {
-    let keyring = match Keyring::new().await {
-        Ok(k) => k,
-        Err(_) => return Ok(()),
+    let Some(keyring) = get_cached_keyring().await else {
+        return Ok(());
     };
 
     let items = keyring

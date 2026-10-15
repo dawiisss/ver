@@ -193,27 +193,17 @@ impl DiscoveryDialog {
         let on_add = Rc::new(on_add_callback);
         let is_already_added = Rc::new(is_already_added);
         let locally_added: Rc<RefCell<Vec<DiscoveredService>>> = Rc::new(RefCell::new(Vec::new()));
-        let is_scanning = Arc::new(std::sync::atomic::AtomicBool::new(false));
 
         let start_scan = move |list_box: gtk::ListBox,
                                spinner: gtk::Spinner,
                                status_label: gtk::Label,
                                on_add: Rc<F>,
                                is_already_added: Rc<C>,
-                               locally_added: Rc<RefCell<Vec<DiscoveredService>>>,
-                               is_scanning: Arc<std::sync::atomic::AtomicBool>|
-              -> Option<Arc<std::sync::atomic::AtomicBool>> {
-            if is_scanning
-                .compare_exchange(
-                    false,
-                    true,
-                    std::sync::atomic::Ordering::SeqCst,
-                    std::sync::atomic::Ordering::SeqCst,
-                )
-                .is_err()
-            {
-                return None;
-            }
+                               locally_added: Rc<RefCell<Vec<DiscoveredService>>>|
+              -> Arc<std::sync::atomic::AtomicBool> {
+            let cancel_token = Arc::new(std::sync::atomic::AtomicBool::new(false));
+            let cancel_token_rx = cancel_token.clone();
+            let cancel_token_thread = cancel_token.clone();
 
             // Clear existing list items
             while let Some(child) = list_box.first_child() {
@@ -225,7 +215,6 @@ impl DiscoveryDialog {
 
             let (sender, receiver) = async_channel::unbounded::<Option<DiscoveredService>>();
 
-            let is_scanning_receiver = is_scanning.clone();
             let spinner_local = spinner.clone();
             let status_label_local = status_label.clone();
             let list_box_local = list_box.clone();
@@ -238,6 +227,10 @@ impl DiscoveryDialog {
                 let mut skipped_count = 0usize;
 
                 while let Ok(msg) = receiver.recv().await {
+                    if cancel_token_rx.load(std::sync::atomic::Ordering::SeqCst) {
+                        break;
+                    }
+
                     match msg {
                         Some(service) => {
                             let already_in_connections = is_already_added_local(&service);
@@ -260,6 +253,7 @@ impl DiscoveryDialog {
                                     service.port,
                                     service.protocol.to_uppercase()
                                 ))
+                                .use_markup(false)
                                 .build();
 
                             let icon_name = match service.protocol.to_lowercase().as_str() {
@@ -347,15 +341,11 @@ impl DiscoveryDialog {
                                     if found_count == 1 { "" } else { "s" }
                                 ));
                             }
-                            is_scanning_receiver.store(false, std::sync::atomic::Ordering::SeqCst);
                             break;
                         }
                     }
                 }
             });
-
-            let cancel_token = Arc::new(std::sync::atomic::AtomicBool::new(false));
-            let cancel_token_thread = cancel_token.clone();
 
             // Spawn scanner thread pool
             thread::spawn(move || {
@@ -456,7 +446,7 @@ impl DiscoveryDialog {
                 let _ = sender.send_blocking(None);
             });
 
-            Some(cancel_token)
+            cancel_token
         };
 
         let current_cancel_token: Arc<
@@ -470,7 +460,6 @@ impl DiscoveryDialog {
             let on_add = on_add.clone();
             let is_already_added = is_already_added.clone();
             let locally_added = locally_added.clone();
-            let is_scanning = is_scanning.clone();
             let current_cancel = current_cancel_token.clone();
 
             move || {
@@ -485,9 +474,8 @@ impl DiscoveryDialog {
                     on_add.clone(),
                     is_already_added.clone(),
                     locally_added.clone(),
-                    is_scanning.clone(),
                 );
-                *current_cancel.lock().unwrap() = token;
+                *current_cancel.lock().unwrap() = Some(token);
             }
         };
 

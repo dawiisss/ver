@@ -1,5 +1,6 @@
 use crate::models::{
-    Connection, RdpCertHandling, RdpColorDepth, RdpNetworkProfile, RdpSecurityProtocol,
+    format_host_port, Connection, RdpCertHandling, RdpColorDepth, RdpNetworkProfile,
+    RdpSecurityProtocol,
 };
 use std::env;
 use std::path::PathBuf;
@@ -57,7 +58,7 @@ pub fn detect_terminal_emulator() -> Option<(&'static str, PathBuf)> {
 /// credentials must be piped via standard input with `/from-stdin:force` to prevent exposure in `ps`/`/proc`.
 pub fn build_rdp_args(conn: &Connection, _password: Option<&str>) -> Vec<String> {
     let port = conn.resolve_port();
-    let mut args = vec![format!("/v:{}:{}", conn.host, port)];
+    let mut args = vec![format!("/v:{}", format_host_port(&conn.host, port))];
 
     if !conn.username.trim().is_empty() {
         args.push(format!("/u:{}", conn.username.trim()));
@@ -207,7 +208,9 @@ pub fn build_rdp_args(conn: &Connection, _password: Option<&str>) -> Vec<String>
         args.push("+aero".to_string());
     }
 
-    if conn.advanced_settings.rdp_hw_accel {
+    if conn.advanced_settings.rdp_hw_accel
+        && !args.iter().any(|a| a == "-gfx" || a.starts_with("/gfx"))
+    {
         args.push("/gfx".to_string());
     }
 
@@ -246,9 +249,19 @@ pub fn build_ssh_args_with_identity(conn: &Connection, identity_file: Option<&st
     }
 
     if let Some(key_path) = identity_file {
-        if !key_path.trim().is_empty() {
+        let trimmed_key = key_path.trim();
+        if !trimmed_key.is_empty() {
             ssh_args.push("-i".to_string());
-            ssh_args.push(key_path.trim().to_string());
+            let expanded = if let Some(stripped) = trimmed_key.strip_prefix("~/") {
+                if let Some(home) = dirs::home_dir() {
+                    home.join(stripped).to_string_lossy().to_string()
+                } else {
+                    trimmed_key.to_string()
+                }
+            } else {
+                trimmed_key.to_string()
+            };
+            ssh_args.push(expanded);
         }
     }
 
@@ -257,6 +270,7 @@ pub fn build_ssh_args_with_identity(conn: &Connection, identity_file: Option<&st
     } else {
         conn.host.trim().to_string()
     };
+    ssh_args.push("--".to_string());
     ssh_args.push(target);
 
     ssh_args
@@ -415,7 +429,7 @@ pub fn build_spice_args(conn: &Connection) -> Vec<String> {
     }
 
     let port = conn.resolve_port();
-    let uri = format!("spice://{}:{}", conn.host, port);
+    let uri = format!("spice://{}", format_host_port(&conn.host, port));
     args.push(uri);
     args
 }
@@ -475,12 +489,20 @@ pub fn build_vnc_args(conn: &Connection) -> Vec<String> {
     } else {
         resolved_port
     };
-    args.push(format!("{}:{}", conn.host.trim(), port_to_use));
+    args.push(format_host_port(&conn.host, port_to_use));
 
     args
 }
 
 pub fn launch_vnc(conn: &Connection, password: Option<&str>) -> Result<Child, String> {
+    launch_vnc_with_binary(conn, password, "vncviewer")
+}
+
+pub fn launch_vnc_with_binary(
+    conn: &Connection,
+    password: Option<&str>,
+    vncviewer_bin: &str,
+) -> Result<Child, String> {
     if conn.host.trim().is_empty() {
         return Err("Connection host cannot be empty".to_string());
     }
@@ -541,7 +563,7 @@ pub fn launch_vnc(conn: &Connection, password: Option<&str>) -> Result<Child, St
         }
     }
 
-    let mut cmd = Command::new("vncviewer");
+    let mut cmd = Command::new(vncviewer_bin);
 
     cmd.args(&args)
         .stdin(Stdio::null())
@@ -554,9 +576,15 @@ pub fn launch_vnc(conn: &Connection, password: Option<&str>) -> Result<Child, St
         cmd.process_group(0);
     }
 
-    let child = cmd
-        .spawn()
-        .map_err(|e| format!("Failed to spawn vncviewer process: {}", e))?;
+    let child = match cmd.spawn() {
+        Ok(child) => child,
+        Err(e) => {
+            if let Some(ref path) = temp_file_path {
+                let _ = std::fs::remove_file(path);
+            }
+            return Err(format!("Failed to spawn {} process: {}", vncviewer_bin, e));
+        }
+    };
 
     // Clean up temporary password file once vncviewer has started and read it, or immediately if vncviewer exits
     if let Some(path) = temp_file_path {
@@ -720,7 +748,8 @@ mod tests {
         assert_eq!(args[0], "ssh");
         assert_eq!(args[1], "-p");
         assert_eq!(args[2], "2222");
-        assert_eq!(args[3], "devops@bastion.example.com");
+        assert_eq!(args[3], "--");
+        assert_eq!(args[4], "devops@bastion.example.com");
     }
 
     #[test]
@@ -735,7 +764,7 @@ mod tests {
 
         let args = build_ssh_args(&conn);
 
-        assert_eq!(args, vec!["ssh", "root@shell.example.com"]);
+        assert_eq!(args, vec!["ssh", "--", "root@shell.example.com"]);
     }
 
     #[test]
@@ -758,9 +787,92 @@ mod tests {
                 "2222",
                 "-i",
                 "/home/user/.ssh/id_ed25519",
+                "--",
                 "admin@secure.example.com"
             ]
         );
+    }
+
+    #[test]
+    fn test_build_ssh_args_tilde_expansion() {
+        let conn = Connection {
+            protocol: Protocol::Ssh,
+            host: "bastion.example.com".to_string(),
+            port: 22,
+            username: "devops".to_string(),
+            ..Default::default()
+        };
+
+        let args = build_ssh_args_with_identity(&conn, Some("~/.ssh/id_ed25519"));
+        if let Some(home) = dirs::home_dir() {
+            let expected_key = home.join(".ssh/id_ed25519").to_string_lossy().to_string();
+            assert_eq!(
+                args,
+                vec![
+                    "ssh",
+                    "-i",
+                    &expected_key,
+                    "--",
+                    "devops@bastion.example.com"
+                ]
+            );
+        }
+    }
+
+    #[test]
+    fn test_build_rdp_args_hw_accel_no_conflict_with_gfx() {
+        let mut conn = Connection::new_with_protocol(Protocol::Rdp);
+        conn.host = "192.168.1.1".to_string();
+        conn.advanced_settings.rdp_color_depth = RdpColorDepth::TrueColor32;
+        conn.advanced_settings.rdp_hw_accel = true;
+
+        let args = build_rdp_args(&conn, None);
+        assert!(args.contains(&"-gfx".to_string()));
+        assert!(!args.contains(&"/gfx".to_string()));
+    }
+
+    #[test]
+    fn test_format_host_port_ipv6() {
+        let mut conn = Connection::new_with_protocol(Protocol::Rdp);
+        conn.host = "2001:db8::1".to_string();
+        conn.port = 3389;
+
+        let args = build_rdp_args(&conn, None);
+        assert!(args.contains(&"/v:[2001:db8::1]:3389".to_string()));
+    }
+
+    #[test]
+    fn test_launch_vnc_cleans_temp_file_on_spawn_failure() {
+        let mut conn = Connection::new_with_protocol(Protocol::Vnc);
+        conn.host = "127.0.0.1".to_string();
+        conn.port = 5900;
+
+        let temp_before = std::fs::read_dir("/tmp")
+            .map(|entries| {
+                entries
+                    .filter_map(|e| e.ok())
+                    .filter(|e| e.file_name().to_string_lossy().starts_with("ver_vnc_"))
+                    .count()
+            })
+            .unwrap_or(0);
+
+        let res = launch_vnc_with_binary(
+            &conn,
+            Some("dummy_password"),
+            "__ver_nonexistent_vncviewer_bin__",
+        );
+        assert!(res.is_err());
+
+        let temp_after = std::fs::read_dir("/tmp")
+            .map(|entries| {
+                entries
+                    .filter_map(|e| e.ok())
+                    .filter(|e| e.file_name().to_string_lossy().starts_with("ver_vnc_"))
+                    .count()
+            })
+            .unwrap_or(0);
+
+        assert_eq!(temp_after, temp_before);
     }
 
     #[test]

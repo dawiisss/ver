@@ -29,6 +29,47 @@ pub const STATUS_DOT_CSS: &str = "
 }
 ";
 
+pub fn protocol_icon_name(proto: Protocol) -> &'static str {
+    match proto {
+        Protocol::Rdp | Protocol::Xrdp => "video-display-symbolic",
+        Protocol::Vnc => "computer-symbolic",
+        Protocol::Ssh => "utilities-terminal-symbolic",
+        Protocol::Spice => "video-display-symbolic",
+    }
+}
+
+pub fn update_connection_row(row: &gtk::ListBoxRow, conn: &Connection) {
+    if let Some(child) = row.child() {
+        if let Ok(action_row) = child.downcast::<adw::ActionRow>() {
+            action_row.set_title(&conn.name);
+            let subtitle = if conn.username.is_empty() {
+                conn.host.clone()
+            } else {
+                format!("{}@{}", conn.username, conn.host)
+            };
+            action_row.set_subtitle(&subtitle);
+
+            let icon_name = protocol_icon_name(conn.protocol);
+            find_and_update_protocol_icon(&action_row.upcast::<gtk::Widget>(), icon_name);
+        }
+    }
+}
+
+fn find_and_update_protocol_icon(widget: &gtk::Widget, icon_name: &str) -> bool {
+    if let Ok(img) = widget.clone().downcast::<gtk::Image>() {
+        img.set_icon_name(Some(icon_name));
+        return true;
+    }
+    let mut child = widget.first_child();
+    while let Some(c) = child {
+        if find_and_update_protocol_icon(&c, icon_name) {
+            return true;
+        }
+        child = c.next_sibling();
+    }
+    false
+}
+
 pub fn create_connection_row(
     conn: &Connection,
     state: Rc<RefCell<AppWindowState>>,
@@ -36,12 +77,7 @@ pub fn create_connection_row(
     let row = gtk::ListBoxRow::new();
     row.set_widget_name(&conn.id);
 
-    let icon_name = match conn.protocol {
-        Protocol::Rdp | Protocol::Xrdp => "video-display-symbolic",
-        Protocol::Vnc => "computer-symbolic",
-        Protocol::Ssh => "utilities-terminal-symbolic",
-        Protocol::Spice => "video-display-symbolic",
-    };
+    let icon_name = protocol_icon_name(conn.protocol);
 
     let subtitle = if conn.username.is_empty() {
         conn.host.clone()
@@ -52,6 +88,7 @@ pub fn create_connection_row(
     let action_row = adw::ActionRow::builder()
         .title(&conn.name)
         .subtitle(subtitle)
+        .use_markup(false)
         .build();
 
     // Prefix container with Status Dot and Protocol Icon

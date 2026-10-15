@@ -216,6 +216,9 @@ pub fn track_external_session(
 
     std::thread::spawn(move || loop {
         std::thread::sleep(std::time::Duration::from_millis(500));
+        if !is_running_for_wait.load(Ordering::SeqCst) {
+            break;
+        }
         let mut opt = child_arc_for_wait.lock().unwrap();
         if let Some(ref mut c) = *opt {
             if let Ok(Some(status)) = c.try_wait() {
@@ -277,6 +280,15 @@ pub fn launch_session(
     stack: &gtk::Stack,
     container: &gtk::Box,
 ) {
+    if state.borrow().active_sessions.contains_key(&conn.id) {
+        show_external_session(container, stack, state, list_box, &conn.id);
+        toast_overlay.add_toast(adw::Toast::new(&format!(
+            "Session for '{}' is already active",
+            conn.name
+        )));
+        return;
+    }
+
     state.borrow_mut().config.last_connected_id = Some(conn.id.clone());
     let _ = storage::save_config(&state.borrow().config);
 

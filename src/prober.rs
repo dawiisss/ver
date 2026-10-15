@@ -1,6 +1,8 @@
 use std::net::{SocketAddr, ToSocketAddrs};
 use std::time::{Duration, Instant};
 
+use crate::models::format_host_port;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum HostStatus {
     Unknown,
@@ -50,7 +52,7 @@ pub fn probe_host_sync(host: &str, port: u16, timeout: Duration) -> HostStatus {
         };
     }
 
-    let target = format!("{}:{}", host.trim(), port);
+    let target = format_host_port(host, port);
     let start = Instant::now();
 
     // Fast path: If host is an IP address, parse directly without blocking libc getaddrinfo DNS resolution

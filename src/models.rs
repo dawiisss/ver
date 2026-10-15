@@ -411,15 +411,19 @@ impl Connection {
         if trimmed.is_empty() {
             return Ok(None);
         }
-        let clean: String = trimmed.chars().filter(|c| c.is_ascii_hexdigit()).collect();
-        if clean.len() == 12 {
-            Ok(Some(clean.to_uppercase()))
-        } else {
-            Err(format!(
-                "Invalid MAC address format: '{}'",
-                self.mac_address
-            ))
-        }
+        let mac_bytes = crate::network::parse_mac_address(trimmed)?;
+        let formatted: String = mac_bytes.iter().map(|b| format!("{:02X}", b)).collect();
+        Ok(Some(formatted))
+    }
+}
+
+/// Format a host and port string, enclosing IPv6 literals in brackets `[...]`.
+pub fn format_host_port(host: &str, port: u16) -> String {
+    let trimmed = host.trim();
+    if trimmed.contains(':') && !trimmed.starts_with('[') {
+        format!("[{}]:{}", trimmed, port)
+    } else {
+        format!("{}:{}", trimmed, port)
     }
 }
 

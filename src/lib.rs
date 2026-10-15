@@ -14,7 +14,9 @@ pub use importers::{
     import_ssh_config_file, merge_imported_connections, scan_remmina_profiles,
     ImportConflictStrategy, ImporterError,
 };
-pub use models::{AdvancedSettings, AppConfig, Connection, Protocol, VncColorLevel};
+pub use models::{
+    format_host_port, AdvancedSettings, AppConfig, Connection, Protocol, VncColorLevel,
+};
 pub use prober::{
     probe_connections_batch, probe_host_async, probe_host_sync, spawn_batch_probe, HostStatus,
 };

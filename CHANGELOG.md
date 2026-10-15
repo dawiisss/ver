@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.5.1] - 2026-10-13
+
+### Security
+- **SSH Target Flag Injection Protection**: Inserted `--` command delimiter before SSH remote host targets to prevent parameter injection attacks.
+- **Pango Dynamic Markup Injection Protection**: Explicitly disabled markup rendering (`.use_markup(false)`) across dynamic labels and subtitles in Sidebar, Discovery, Import, and Export dialogs to prevent Pango markup injection from untrusted remote hostnames or service banners.
+- **Strict MAC Address Validation & Normalization**: Enforced validation and normalized uppercase hex formatting for MAC addresses via `network::parse_mac_address` to prevent malformed or malicious broadcast payloads.
+- **VNC Temporary Password Cleanup on Spawn Error**: Ensured temporary VNC password files (`/tmp/ver_vnc_*.pwd`) are synchronously removed if viewer process spawning fails.
+- **Keyring Thread & Session Protection**: Cached Secret Service Keyring instances via `OnceCell<Option<Keyring>>` to eliminate redundant D-Bus handshakes, and guarded against duplicate concurrent session spawns for active connections.
+
+### Fixed
+- **System Tray Window Restoration**: Reused existing hidden application window on tray activation and desktop entry launch instead of instantiating redundant duplicate windows.
+- **Keyboard Shortcut Focus Scoping**: Scoped `Delete` and `Return` key accelerators to the connection list sidebar so form entry fields (e.g. typing in editor, quick connect, or search) are not intercepted.
+- **Network Discovery Rescan Race Condition**: Replaced global scanning state flags with per-scan cancellation tokens, enabling immediate rescan without deadlocks or missed sweep events.
+- **Editor Wake-on-LAN Stale State**: Propagated live unsaved editor fields (MAC, host, port, name) to Wake-on-LAN actions rather than falling back to stale saved connection data.
+- **Delete Confirmation Name Verification**: Ensured delete confirmation modal verifies against current editor entry name.
+- **Sidebar Connection Row Live Update**: Added dynamic connection row updates (`update_connection_row`) on connection save to immediately refresh title, subtitle, icon, and reachability indicator without requiring a full sidebar rebuild.
+- **XRDP Protocol Export**: Included `Protocol::Xrdp` in `.rdp` export format generation.
+- **FreeRDP Graphics Flag Collision**: Eliminated conflicting `-gfx` / `/gfx` arguments when hardware acceleration is toggled.
+- **VNC Color Level Preference**: Applied default VNC color level preferences to newly created VNC connections.
+
+### Changed
+- **IPv6 Host-Port Formatting**: Standardized bracketed IPv6 formatting (`[host]:port`) across RDP, FreeRDP, and VNC command launchers via `format_host_port`.
+- **SSH Identity Path Expansion**: Expanded leading tildes (`~/`) in SSH identity file paths to absolute home paths before process execution.
+- **Deterministic Test Harness**: Extracted `launch_vnc_with_binary` in `launcher.rs` to allow deterministic unit testing of process spawn failure and temporary file cleanup on systems with `vncviewer` installed on `PATH`.
+
 ## [1.5.0] - 2026-10-13
 
 ### Security

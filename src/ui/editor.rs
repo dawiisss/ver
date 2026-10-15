@@ -71,7 +71,7 @@ impl ConnectionEditor {
         FConn: Fn(Connection, String) + 'static,
         FDup: Fn(Connection, String) + 'static,
         FDel: Fn(String) + 'static,
-        FWake: Fn(String) + 'static,
+        FWake: Fn(String, String, u16, String) + 'static,
     {
         let toast_overlay = adw::ToastOverlay::new();
 
@@ -635,18 +635,21 @@ impl ConnectionEditor {
         // Helper to extract Connection and Password from form
         let conn_id = conn.id.clone();
         let mac_for_extract = entry_mac.clone();
+        let entry_name_extract = entry_name.clone();
+        let entry_host_extract = entry_host.clone();
+        let entry_port_extract = entry_port.clone();
         let extract_form = move || -> Result<(Connection, String), String> {
-            let name = entry_name.text().to_string();
+            let name = entry_name_extract.text().to_string();
             if name.trim().is_empty() {
                 return Err("Connection name cannot be empty".to_string());
             }
 
-            let host = entry_host.text().to_string();
+            let host = entry_host_extract.text().to_string();
             if host.trim().is_empty() {
                 return Err("Host address cannot be empty".to_string());
             }
 
-            let port_str = entry_port.text().to_string();
+            let port_str = entry_port_extract.text().to_string();
             let port: u16 = match port_str.parse() {
                 Ok(p) if p > 0 => p,
                 _ => return Err("Port must be a valid number between 1 and 65535".to_string()),
@@ -812,14 +815,21 @@ impl ConnectionEditor {
 
         let del_id = conn.id.clone();
         let del_name = conn.name.clone();
+        let name_for_del = entry_name.clone();
         let on_delete_rc = std::rc::Rc::new(on_delete);
         let toast_overlay_del = toast_overlay.clone();
         btn_delete.connect_clicked(move |_| {
+            let current_name = name_for_del.text();
+            let display_name = if current_name.trim().is_empty() {
+                &del_name
+            } else {
+                current_name.as_str()
+            };
             let dialog = adw::MessageDialog::builder()
                 .heading("Delete Connection?")
                 .body(format!(
                     "Are you sure you want to delete \"{}\"? This action cannot be undone.",
-                    del_name
+                    display_name
                 ))
                 .build();
             dialog.add_response("cancel", "Cancel");
@@ -847,6 +857,11 @@ impl ConnectionEditor {
         });
 
         let mac_for_wake = entry_mac.clone();
+        let host_for_wake = entry_host.clone();
+        let port_for_wake = entry_port.clone();
+        let name_for_wake = entry_name.clone();
+        let fallback_port = conn.port;
+        let fallback_name = conn.name.clone();
         let toast_overlay_wake = toast_overlay.clone();
         btn_wake.connect_clicked(move |_| {
             let mac_str = mac_for_wake.text().to_string();
@@ -856,7 +871,21 @@ impl ConnectionEditor {
             };
             match test_conn.validate_mac() {
                 Ok(Some(clean_mac)) => {
-                    on_wake(clean_mac);
+                    let current_host = host_for_wake.text().trim().to_string();
+                    let current_port = port_for_wake
+                        .text()
+                        .trim()
+                        .parse::<u16>()
+                        .unwrap_or(fallback_port);
+                    let current_name = {
+                        let n = name_for_wake.text().trim().to_string();
+                        if n.is_empty() {
+                            fallback_name.clone()
+                        } else {
+                            n
+                        }
+                    };
+                    on_wake(clean_mac, current_host, current_port, current_name);
                     toast_overlay_wake.add_toast(adw::Toast::new("Wake-on-LAN packet sent"));
                 }
                 Ok(None) => {

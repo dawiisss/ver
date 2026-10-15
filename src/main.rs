@@ -79,7 +79,11 @@ fn main() {
         while let Ok(msg) = rx.recv().await {
             match msg {
                 TrayMessage::Show => {
-                    if let Some(window) = app_clone.active_window() {
+                    if let Some(window) = app_clone
+                        .active_window()
+                        .or_else(|| app_clone.windows().into_iter().next())
+                    {
+                        window.set_visible(true);
                         window.present();
                     } else {
                         app_clone.activate();
@@ -93,6 +97,14 @@ fn main() {
     });
 
     app.connect_activate(|app| {
+        if let Some(window) = app
+            .active_window()
+            .or_else(|| app.windows().into_iter().next())
+        {
+            window.set_visible(true);
+            window.present();
+            return;
+        }
         let config = load_config().unwrap_or_default();
         apply_theme(&config.theme);
 
