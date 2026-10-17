@@ -4,14 +4,14 @@ use gtk::glib;
 use gtk::prelude::*;
 use libadwaita as adw;
 use libadwaita::prelude::*;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, HashMap};
 use std::rc::Rc;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 use crate::importers::{merge_imported_connections, ImportConflictStrategy};
-use crate::models::{AppConfig, Connection};
+use crate::models::{AppConfig, Connection, Protocol};
 use crate::network;
 use crate::prober::{self, HostStatus};
 use crate::secrets;
@@ -44,6 +44,62 @@ pub struct MainWindow {
     pub search_filter: String,
     pub config: AppConfig,
     pub window: Option<adw::ApplicationWindow>,
+}
+
+fn commit_connections<T>(
+    state: &Rc<RefCell<AppWindowState>>,
+    toast: &adw::ToastOverlay,
+    update: impl FnOnce(&mut Vec<Connection>) -> T,
+) -> Option<T> {
+    let result = storage::update_connections(&mut state.borrow_mut().connections, update);
+    match result {
+        Ok(value) => Some(value),
+        Err(error) => {
+            toast.add_toast(adw::Toast::new(&format!(
+                "Connections were not saved: {:#}",
+                error
+            )));
+            None
+        }
+    }
+}
+
+async fn save_password(id: &str, password: &str, toast: &adw::ToastOverlay) -> bool {
+    let result = if password.is_empty() {
+        secrets::delete_password(id).await
+    } else {
+        secrets::set_password(id, password).await
+    };
+    match result {
+        Ok(()) => true,
+        Err(error) => {
+            toast.add_toast(adw::Toast::new(&format!(
+                "Connection settings saved, but the password change failed: {:#}",
+                error
+            )));
+            false
+        }
+    }
+}
+
+fn launch_with_stored_password<F>(conn: Connection, launch: Rc<F>, toast: &adw::ToastOverlay)
+where
+    F: Fn(Connection, String) + 'static,
+{
+    if conn.protocol == Protocol::Ssh {
+        launch(conn, String::new());
+        return;
+    }
+    let toast = toast.clone();
+    glib::MainContext::default().spawn_local(async move {
+        match secrets::get_password(&conn.id).await {
+            Ok(password) => launch(conn, password.unwrap_or_default()),
+            Err(error) => toast.add_toast(adw::Toast::new(&format!(
+                "Could not load password. Enter it in the editor to connect: {:#}",
+                error
+            ))),
+        }
+    });
 }
 
 impl MainWindow {
@@ -248,6 +304,12 @@ impl MainWindow {
 
         content_stack.add_named(&status_page, Some("welcome"));
         content_stack.add_named(&editor_container, Some("editor"));
+        let loading = adw::StatusPage::builder()
+            .title("Loading Connection")
+            .description("Retrieving the saved password…")
+            .child(&gtk::Spinner::builder().spinning(true).build())
+            .build();
+        content_stack.add_named(&loading, Some("loading"));
 
         // External Session Tracker Container
         let external_session_container = gtk::Box::new(gtk::Orientation::Vertical, 0);
@@ -362,7 +424,7 @@ impl MainWindow {
                     let st = state_for_probe.borrow();
                     st.connections
                         .iter()
-                        .map(|c| (c.id.clone(), c.host.clone(), c.port))
+                        .map(|c| (c.id.clone(), c.host.clone(), c.resolve_port()))
                         .collect()
                 };
 
@@ -413,13 +475,19 @@ impl MainWindow {
             let list_box = list_box.clone();
             let window_title = window_title.clone();
             let create_row_inner = create_row_for_add.clone();
+            let toast = toast_overlay.clone();
             Rc::new(move || {
                 let default_protocol = state.borrow().config.default_protocol;
                 let mut new_conn = Connection::new_with_protocol(default_protocol);
                 new_conn.advanced_settings.vnc_color_level =
                     state.borrow().config.default_vnc_color_level;
-                state.borrow_mut().connections.push(new_conn.clone());
-                let _ = storage::save_connections(&state.borrow().connections);
+                if commit_connections(&state, &toast, |connections| {
+                    connections.push(new_conn.clone())
+                })
+                .is_none()
+                {
+                    return;
+                }
 
                 let row = create_row_inner(&new_conn);
                 list_box.append(&row);
@@ -446,6 +514,7 @@ impl MainWindow {
         let window_title_for_qc = window_title.clone();
         let launch_session_for_qc = launch_session.clone();
         let create_row_for_qc = create_row.clone();
+        let toast_for_qc = toast_overlay.clone();
 
         let open_quick_connect = Rc::new(move || {
             let default_proto = state_for_qc.borrow().config.default_protocol;
@@ -455,6 +524,7 @@ impl MainWindow {
             let window_title_save = window_title_for_qc.clone();
             let launch_save = launch_session_for_qc.clone();
             let create_row_save = create_row_for_qc.clone();
+            let toast_save = toast_for_qc.clone();
 
             QuickConnectDialog::show(
                 &window_for_qc,
@@ -464,28 +534,47 @@ impl MainWindow {
                 },
                 move |conn, pass| {
                     let pass_str = pass.unwrap_or_default();
-                    if !pass_str.is_empty() {
-                        let conn_id = conn.id.clone();
-                        let pass_for_secret = pass_str.clone();
-                        glib::MainContext::default().spawn_local(async move {
-                            let _ = secrets::set_password(&conn_id, &pass_for_secret).await;
-                        });
+                    if commit_connections(&state_save, &toast_save, |connections| {
+                        connections.push(conn.clone())
+                    })
+                    .is_none()
+                    {
+                        return false;
                     }
-                    state_save.borrow_mut().connections.push(conn.clone());
-                    let _ = storage::save_connections(&state_save.borrow().connections);
-
                     let row = create_row_save(&conn);
                     list_box_save.append(&row);
                     list_box_save.invalidate_filter();
                     list_box_save.invalidate_sort();
                     list_box_save.invalidate_headers();
-                    list_box_save.select_row(Some(&row));
                     window_title_save.set_subtitle(&format!(
                         "{} connections",
                         state_save.borrow().connections.len()
                     ));
-
-                    launch_save(conn, pass_str);
+                    let selection_before = list_box_save.selected_row();
+                    let state_save = state_save.clone();
+                    let list_box_save = list_box_save.clone();
+                    let toast_save = toast_save.clone();
+                    let launch_save = launch_save.clone();
+                    glib::MainContext::default().spawn_local(async move {
+                        if !pass_str.is_empty() {
+                            save_password(&conn.id, &pass_str, &toast_save).await;
+                        }
+                        if !state_save
+                            .borrow()
+                            .connections
+                            .iter()
+                            .any(|c| c.id == conn.id)
+                        {
+                            return;
+                        }
+                        if row.parent().is_some()
+                            && list_box_save.selected_row() == selection_before
+                        {
+                            list_box_save.select_row(Some(&row));
+                        }
+                        launch_save(conn, pass_str);
+                    });
+                    true
                 },
             );
         });
@@ -516,14 +605,16 @@ impl MainWindow {
                 &window_for_import,
                 move |imported_conns: Vec<Connection>, strategy: ImportConflictStrategy| {
                     if imported_conns.is_empty() {
-                        return;
+                        return false;
                     }
 
-                    let (added, updated, skipped) = {
-                        let mut st = state_inner.borrow_mut();
-                        merge_imported_connections(&mut st.connections, imported_conns, strategy)
+                    let Some((added, updated, skipped)) =
+                        commit_connections(&state_inner, &toast_inner, |connections| {
+                            merge_imported_connections(connections, imported_conns, strategy)
+                        })
+                    else {
+                        return false;
                     };
-                    let _ = storage::save_connections(&state_inner.borrow().connections);
 
                     // Rebuild sidebar rows
                     while let Some(child) = list_box_inner.first_child() {
@@ -548,6 +639,7 @@ impl MainWindow {
                     )));
 
                     trigger_probe_inner();
+                    true
                 },
             );
         });
@@ -597,6 +689,7 @@ impl MainWindow {
         let window_title_for_disc = window_title.clone();
         let create_row_disc = create_row.clone();
         let trigger_probe_disc = trigger_batch_probe.clone();
+        let toast_disc = toast_overlay.clone();
 
         let open_discovery = Rc::new(move || {
             let state_inner = state_for_disc.clone();
@@ -604,6 +697,7 @@ impl MainWindow {
             let window_title_inner = window_title_for_disc.clone();
             let create_row_inner = create_row_disc.clone();
             let trigger_probe_inner = trigger_probe_disc.clone();
+            let toast = toast_disc.clone();
 
             let state_for_check = state_inner.clone();
             let is_already_added = move |service: &DiscoveredService| -> bool {
@@ -617,8 +711,13 @@ impl MainWindow {
                 Some(&window_for_disc),
                 is_already_added,
                 move |new_conn: Connection| {
-                    state_inner.borrow_mut().connections.push(new_conn.clone());
-                    let _ = storage::save_connections(&state_inner.borrow().connections);
+                    if commit_connections(&state_inner, &toast, |connections| {
+                        connections.push(new_conn.clone())
+                    })
+                    .is_none()
+                    {
+                        return false;
+                    }
 
                     let row = create_row_inner(&new_conn);
                     list_box_inner.append(&row);
@@ -632,6 +731,7 @@ impl MainWindow {
                         state_inner.borrow().connections.len()
                     ));
                     trigger_probe_inner();
+                    true
                 },
             );
             disc_window.present();
@@ -708,258 +808,293 @@ impl MainWindow {
         let toast_overlay_for_select = toast_overlay.clone();
         let window_title_for_select = window_title.clone();
 
+        let selection_request = Rc::new(Cell::new(0u64));
         list_box.connect_row_selected(move |_, row_opt| {
+            let request = selection_request.get().wrapping_add(1);
+            selection_request.set(request);
+            let selection_request = selection_request.clone();
             while let Some(child) = editor_container_for_select.first_child() {
                 editor_container_for_select.remove(&child);
             }
 
-            if let Some(row) = row_opt {
-                let conn_id = row.widget_name().to_string();
-                state_for_select.borrow_mut().selected_id = Some(conn_id.clone());
+            state_for_select.borrow_mut().selected_id = row_opt.map(|row| row.widget_name().to_string());
+            let row_opt = row_opt.cloned();
+            let state_for_select = state_for_select.clone();
+            let editor_container_for_select = editor_container_for_select.clone();
+            let content_stack_for_select = content_stack_for_select.clone();
+            let list_box_for_select = list_box_for_select.clone();
+            let launch_session_for_select = launch_session_for_select.clone();
+            let show_session_for_select = show_session_for_select.clone();
+            let create_row_for_select = create_row_for_select.clone();
+            let toast_overlay_for_select = toast_overlay_for_select.clone();
+            let window_title_for_select = window_title_for_select.clone();
+            content_stack_for_select.set_visible_child_name(if row_opt.is_some() { "loading" } else { "welcome" });
+            glib::MainContext::default().spawn_local(async move {
+                if selection_request.get() != request {
+                    return;
+                }
+                if let Some(row) = row_opt {
+                    let conn_id = row.widget_name().to_string();
 
-                let is_session_active = state_for_select
-                    .borrow()
-                    .active_sessions
-                    .get(&conn_id)
-                    .map(|s| s.is_running.load(Ordering::SeqCst))
-                    .unwrap_or(false);
-
-                let conn_opt = state_for_select
-                    .borrow()
-                    .connections
-                    .iter()
-                    .find(|c| c.id == conn_id)
-                    .cloned();
-                if let Some(conn) = conn_opt {
-                    let password = secrets::get_password_sync(&conn.id)
-                        .unwrap_or(None)
-                        .unwrap_or_default();
-
-                    // Wire Callbacks for ConnectionEditor
-                    let state_on_save = state_for_select.clone();
-                    let list_box_on_save = list_box_for_select.clone();
-                    let toast_on_save = toast_overlay_for_select.clone();
-                    let row_on_save = row.clone();
-                    let on_save = move |updated_conn: Connection, updated_pass: String| {
-                        if let Some(c) = state_on_save
-                            .borrow_mut()
-                            .connections
-                            .iter_mut()
-                            .find(|c| c.id == updated_conn.id)
+                    let conn_opt = state_for_select
+                        .borrow()
+                        .connections
+                        .iter()
+                        .find(|c| c.id == conn_id)
+                        .cloned();
+                    if let Some(conn) = conn_opt {
+                        let result = if conn.protocol == Protocol::Ssh {
+                            Ok(None)
+                        } else {
+                            secrets::get_password(&conn.id).await
+                        };
+                        // A slow keyring response must never replace a newer selection's editor.
+                        if selection_request.get() != request
+                            || list_box_for_select.selected_row().as_ref() != Some(&row)
                         {
-                            *c = updated_conn.clone();
+                            return;
                         }
-                        if let Err(e) =
-                            storage::save_connections(&state_on_save.borrow().connections)
-                        {
-                            toast_on_save.add_toast(adw::Toast::new(&format!(
-                                "Failed to save connections: {}",
-                                e
-                            )));
-                        }
+                        let is_session_active = state_for_select
+                            .borrow()
+                            .active_sessions
+                            .get(&conn_id)
+                            .map(|s| s.is_running.load(Ordering::SeqCst))
+                            .unwrap_or(false);
 
-                        let id_for_secret = updated_conn.id.clone();
-                        glib::MainContext::default().spawn_local(async move {
-                            if updated_pass.is_empty() {
-                                let _ = secrets::delete_password(&id_for_secret).await;
-                            } else {
-                                let _ = secrets::set_password(&id_for_secret, &updated_pass).await;
+                        let original_password = match result {
+                            Ok(password) => Some(password.unwrap_or_default()),
+                            Err(error) => {
+                                toast_overlay_for_select.add_toast(adw::Toast::new(&format!("Could not load password; it will be left unchanged unless you enter a replacement: {:#}", error)));
+                                None
                             }
-                        });
+                        };
+                        let password = original_password.clone().unwrap_or_default();
+                        let saved_password = Rc::new(RefCell::new(original_password));
 
-                        update_connection_row(&row_on_save, &updated_conn);
+                        // Wire Callbacks for ConnectionEditor
+                        let state_on_save = state_for_select.clone();
+                        let list_box_on_save = list_box_for_select.clone();
+                        let toast_on_save = toast_overlay_for_select.clone();
+                        let row_on_save = row.clone();
+                        let on_save = move |updated_conn: Connection, updated_pass: String| {
+                            if commit_connections(&state_on_save, &toast_on_save, |connections| {
+                                if let Some(c) = connections.iter_mut().find(|c| c.id == updated_conn.id) {
+                                    *c = updated_conn.clone();
+                                }
+                            })
+                            .is_none()
+                            {
+                                return;
+                            }
 
-                        let host_probe = updated_conn.host.clone();
-                        let port_probe = updated_conn.resolve_port();
-                        let id_probe = updated_conn.id.clone();
-                        let state_probe = state_on_save.clone();
-                        let list_box_probe = list_box_on_save.clone();
-                        glib::MainContext::default().spawn_local(async move {
-                            let status = prober::probe_host_async(
-                                host_probe,
-                                port_probe,
-                                Duration::from_millis(1500),
-                            )
-                            .await;
-                            state_probe
-                                .borrow_mut()
-                                .host_statuses
-                                .insert(id_probe.clone(), status.clone());
-                            set_row_status_dot(&list_box_probe, &id_probe, &status);
-                        });
+                            let password_changed = saved_password
+                                .borrow()
+                                .as_ref()
+                                .map(|old| old != &updated_pass)
+                                .unwrap_or(!updated_pass.is_empty());
+                            if password_changed {
+                                let id = updated_conn.id.clone();
+                                let toast = toast_on_save.clone();
+                                let saved = saved_password.clone();
+                                glib::MainContext::default().spawn_local(async move {
+                                    if save_password(&id, &updated_pass, &toast).await {
+                                        *saved.borrow_mut() = Some(updated_pass);
+                                        toast.add_toast(adw::Toast::new("Connection and password saved"));
+                                    }
+                                });
+                            } else {
+                                toast_on_save.add_toast(adw::Toast::new("Connection settings saved"));
+                            }
 
-                        list_box_on_save.invalidate_sort();
-                        list_box_on_save.invalidate_headers();
-                    };
+                            update_connection_row(&row_on_save, &updated_conn);
 
-                    let launch_session_on_connect = launch_session_for_select.clone();
-                    let on_connect = move |conn: Connection, pass: String| {
-                        launch_session_on_connect(conn, pass);
-                    };
-
-                    let state_on_dup = state_for_select.clone();
-                    let list_box_on_dup = list_box_for_select.clone();
-                    let window_title_on_dup = window_title_for_select.clone();
-                    let toast_on_dup = toast_overlay_for_select.clone();
-                    let create_row_on_dup = create_row_for_select.clone();
-                    let on_duplicate = move |dup_conn: Connection, dup_pass: String| {
-                        state_on_dup.borrow_mut().connections.push(dup_conn.clone());
-                        if let Err(e) =
-                            storage::save_connections(&state_on_dup.borrow().connections)
-                        {
-                            toast_on_dup.add_toast(adw::Toast::new(&format!(
-                                "Failed to save connections: {}",
-                                e
-                            )));
-                        }
-
-                        if !dup_pass.is_empty() {
-                            let dup_id = dup_conn.id.clone();
+                            let host_probe = updated_conn.host.clone();
+                            let port_probe = updated_conn.resolve_port();
+                            let id_probe = updated_conn.id.clone();
+                            let state_probe = state_on_save.clone();
+                            let list_box_probe = list_box_on_save.clone();
                             glib::MainContext::default().spawn_local(async move {
-                                let _ = secrets::set_password(&dup_id, &dup_pass).await;
-                            });
-                        }
-
-                        let new_row = create_row_on_dup(&dup_conn);
-                        list_box_on_dup.append(&new_row);
-                        list_box_on_dup.invalidate_filter();
-                        list_box_on_dup.invalidate_sort();
-                        list_box_on_dup.invalidate_headers();
-
-                        list_box_on_dup.select_row(Some(&new_row));
-                        window_title_on_dup.set_subtitle(&format!(
-                            "{} connections",
-                            state_on_dup.borrow().connections.len()
-                        ));
-                    };
-
-                    let state_on_del = state_for_select.clone();
-                    let list_box_on_del = list_box_for_select.clone();
-                    let window_title_on_del = window_title_for_select.clone();
-                    let toast_on_del = toast_overlay_for_select.clone();
-                    let row_on_del = row.clone();
-                    let on_delete = move |del_id: String| {
-                        state_on_del
-                            .borrow_mut()
-                            .connections
-                            .retain(|c| c.id != del_id);
-                        if let Err(e) =
-                            storage::save_connections(&state_on_del.borrow().connections)
-                        {
-                            toast_on_del.add_toast(adw::Toast::new(&format!(
-                                "Failed to save connections: {}",
-                                e
-                            )));
-                        }
-                        let del_id_clone = del_id.clone();
-                        glib::MainContext::default().spawn_local(async move {
-                            let _ = secrets::delete_password(&del_id_clone).await;
-                        });
-
-                        list_box_on_del.remove(&row_on_del);
-                        list_box_on_del.unselect_all();
-                        window_title_on_del.set_subtitle(&format!(
-                            "{} connections",
-                            state_on_del.borrow().connections.len()
-                        ));
-                    };
-
-                    // Context-Aware Wake-on-LAN with Automated Polling
-                    let state_on_wake = state_for_select.clone();
-                    let list_box_on_wake = list_box_for_select.clone();
-                    let toast_on_wake = toast_overlay_for_select.clone();
-                    let conn_for_wake = conn.clone();
-
-                    let on_wake = move |mac: String,
-                                        target_host: String,
-                                        target_port: u16,
-                                        target_name: String| {
-                        let _ = network::send_wol(&mac);
-                        let target_id = conn_for_wake.id.clone();
-
-                        let state_poll = state_on_wake.clone();
-                        let list_box_poll = list_box_on_wake.clone();
-                        let toast_poll = toast_on_wake.clone();
-
-                        // Set probing status immediately
-                        state_poll
-                            .borrow_mut()
-                            .host_statuses
-                            .insert(target_id.clone(), HostStatus::Probing);
-                        set_row_status_dot(&list_box_poll, &target_id, &HostStatus::Probing);
-
-                        // Spawn polling task: probe every 2 seconds for up to 30 seconds
-                        glib::MainContext::default().spawn_local(async move {
-                            for _ in 0..15 {
-                                glib::timeout_future(Duration::from_millis(2000)).await;
                                 let status = prober::probe_host_async(
-                                    target_host.clone(),
-                                    target_port,
+                                    host_probe,
+                                    port_probe,
                                     Duration::from_millis(1500),
                                 )
                                 .await;
+                                state_probe
+                                    .borrow_mut()
+                                    .host_statuses
+                                    .insert(id_probe.clone(), status.clone());
+                                set_row_status_dot(&list_box_probe, &id_probe, &status);
+                            });
 
-                                if status.is_online() {
+                            list_box_on_save.invalidate_sort();
+                            list_box_on_save.invalidate_headers();
+                        };
+
+                        let launch_session_on_connect = launch_session_for_select.clone();
+                        let on_connect = move |conn: Connection, pass: String| {
+                            launch_session_on_connect(conn, pass);
+                        };
+
+                        let state_on_dup = state_for_select.clone();
+                        let list_box_on_dup = list_box_for_select.clone();
+                        let window_title_on_dup = window_title_for_select.clone();
+                        let toast_on_dup = toast_overlay_for_select.clone();
+                        let create_row_on_dup = create_row_for_select.clone();
+                        let on_duplicate = move |dup_conn: Connection, dup_pass: String| {
+                            if commit_connections(&state_on_dup, &toast_on_dup, |connections| {
+                                connections.push(dup_conn.clone())
+                            })
+                            .is_none()
+                            {
+                                return;
+                            }
+                            let new_row = create_row_on_dup(&dup_conn);
+                            list_box_on_dup.append(&new_row);
+                            list_box_on_dup.invalidate_filter();
+                            list_box_on_dup.invalidate_sort();
+                            list_box_on_dup.invalidate_headers();
+                            window_title_on_dup.set_subtitle(&format!(
+                                "{} connections",
+                                state_on_dup.borrow().connections.len()
+                            ));
+                            let selection_before = list_box_on_dup.selected_row();
+                            let list_box = list_box_on_dup.clone();
+                            let toast = toast_on_dup.clone();
+                            glib::MainContext::default().spawn_local(async move {
+                                if !dup_pass.is_empty() {
+                                    save_password(&dup_conn.id, &dup_pass, &toast).await;
+                                }
+                                if new_row.parent().is_some() && list_box.selected_row() == selection_before {
+                                    list_box.select_row(Some(&new_row));
+                                }
+                                toast.add_toast(adw::Toast::new("Connection duplicated"));
+                            });
+                        };
+
+                        let state_on_del = state_for_select.clone();
+                        let list_box_on_del = list_box_for_select.clone();
+                        let window_title_on_del = window_title_for_select.clone();
+                        let toast_on_del = toast_overlay_for_select.clone();
+                        let row_on_del = row.clone();
+                        let on_delete = move |del_id: String| {
+                            if commit_connections(&state_on_del, &toast_on_del, |connections| {
+                                connections.retain(|c| c.id != del_id)
+                            })
+                            .is_none()
+                            {
+                                return;
+                            }
+                            let toast = toast_on_del.clone();
+                            glib::MainContext::default().spawn_local(async move {
+                                        if let Err(error) = secrets::delete_password(&del_id).await {
+                                            toast.add_toast(adw::Toast::new(&format!("Connection deleted, but its stored password could not be removed: {:#}", error)));
+                                        }
+                                    });
+
+                            list_box_on_del.remove(&row_on_del);
+                            list_box_on_del.unselect_all();
+                            window_title_on_del.set_subtitle(&format!(
+                                "{} connections",
+                                state_on_del.borrow().connections.len()
+                            ));
+                        };
+
+                        // Context-Aware Wake-on-LAN with Automated Polling
+                        let state_on_wake = state_for_select.clone();
+                        let list_box_on_wake = list_box_for_select.clone();
+                        let toast_on_wake = toast_overlay_for_select.clone();
+                        let conn_for_wake = conn.clone();
+
+                        let on_wake =
+                            move |mac: String, target_host: String, target_port: u16, target_name: String| {
+                                let _ = network::send_wol(&mac);
+                                let target_id = conn_for_wake.id.clone();
+
+                                let state_poll = state_on_wake.clone();
+                                let list_box_poll = list_box_on_wake.clone();
+                                let toast_poll = toast_on_wake.clone();
+
+                                // Set probing status immediately
+                                state_poll
+                                    .borrow_mut()
+                                    .host_statuses
+                                    .insert(target_id.clone(), HostStatus::Probing);
+                                set_row_status_dot(&list_box_poll, &target_id, &HostStatus::Probing);
+
+                                // Spawn polling task: probe every 2 seconds for up to 30 seconds
+                                glib::MainContext::default().spawn_local(async move {
+                                    for _ in 0..15 {
+                                        glib::timeout_future(Duration::from_millis(2000)).await;
+                                        let status = prober::probe_host_async(
+                                            target_host.clone(),
+                                            target_port,
+                                            Duration::from_millis(1500),
+                                        )
+                                        .await;
+
+                                        if status.is_online() {
+                                            state_poll
+                                                .borrow_mut()
+                                                .host_statuses
+                                                .insert(target_id.clone(), status.clone());
+                                            set_row_status_dot(&list_box_poll, &target_id, &status);
+                                            toast_poll.add_toast(adw::Toast::new(&format!(
+                                                "Host '{}' is now online!",
+                                                target_name
+                                            )));
+                                            return;
+                                        }
+                                    }
+
+                                    let final_status = HostStatus::Offline {
+                                        reason: "Host did not wake up within 30s".to_string(),
+                                    };
                                     state_poll
                                         .borrow_mut()
                                         .host_statuses
-                                        .insert(target_id.clone(), status.clone());
-                                    set_row_status_dot(&list_box_poll, &target_id, &status);
-                                    toast_poll.add_toast(adw::Toast::new(&format!(
-                                        "Host '{}' is now online!",
-                                        target_name
-                                    )));
-                                    return;
-                                }
-                            }
-
-                            let final_status = HostStatus::Offline {
-                                reason: "Host did not wake up within 30s".to_string(),
+                                        .insert(target_id.clone(), final_status.clone());
+                                    set_row_status_dot(&list_box_poll, &target_id, &final_status);
+                                });
                             };
-                            state_poll
-                                .borrow_mut()
-                                .host_statuses
-                                .insert(target_id.clone(), final_status.clone());
-                            set_row_status_dot(&list_box_poll, &target_id, &final_status);
-                        });
-                    };
 
-                    let editor_widget = ConnectionEditor::build_widget(
-                        conn,
-                        password,
-                        on_save,
-                        on_connect,
-                        on_duplicate,
-                        on_delete,
-                        on_wake,
-                    );
+                        let editor_widget = ConnectionEditor::build_widget(
+                            conn,
+                            password,
+                            on_save,
+                            on_connect,
+                            on_duplicate,
+                            on_delete,
+                            on_wake,
+                        );
 
-                    if is_session_active {
-                        let banner = adw::Banner::builder()
-                            .title("An active session is currently running for this connection")
-                            .button_label("View Session")
-                            .revealed(true)
-                            .build();
-                        let show_session_for_banner = show_session_for_select.clone();
-                        let id_for_banner = conn_id.clone();
-                        banner.connect_button_clicked(move |_| {
-                            show_session_for_banner(&id_for_banner);
-                        });
-                        editor_container_for_select.append(&banner);
+                        if is_session_active {
+                            let banner = adw::Banner::builder()
+                                .title("An active session is currently running for this connection")
+                                .button_label("View Session")
+                                .revealed(true)
+                                .build();
+                            let show_session_for_banner = show_session_for_select.clone();
+                            let id_for_banner = conn_id.clone();
+                            banner.connect_button_clicked(move |_| {
+                                show_session_for_banner(&id_for_banner);
+                            });
+                            editor_container_for_select.append(&banner);
+                        }
+
+                        editor_container_for_select.append(&editor_widget);
+
+                        if is_session_active {
+                            show_session_for_select(&conn_id);
+                        } else {
+                            content_stack_for_select.set_visible_child_name("editor");
+                        }
                     }
-
-                    editor_container_for_select.append(&editor_widget);
-
-                    if is_session_active {
-                        show_session_for_select(&conn_id);
-                    } else {
-                        content_stack_for_select.set_visible_child_name("editor");
-                    }
+                } else {
+                    state_for_select.borrow_mut().selected_id = None;
+                    content_stack_for_select.set_visible_child_name("welcome");
                 }
-            } else {
-                state_for_select.borrow_mut().selected_id = None;
-                content_stack_for_select.set_visible_child_name("welcome");
-            }
+            });
         });
 
         // Global Keyboard Event Controller (Accelerators)
@@ -1085,21 +1220,16 @@ impl MainWindow {
 
                                 dialog.connect_response(None, move |d, response| {
                                     if response == "delete" {
-                                        state_del
-                                            .borrow_mut()
-                                            .connections
-                                            .retain(|c| c.id != del_id);
-                                        if let Err(e) = storage::save_connections(
-                                            &state_del.borrow().connections,
-                                        ) {
-                                            toast_del.add_toast(adw::Toast::new(&format!(
-                                                "Failed to save connections: {}",
-                                                e
-                                            )));
+                                        if commit_connections(&state_del, &toast_del, |connections| connections.retain(|c| c.id != del_id)).is_none() {
+                                            d.close();
+                                            return;
                                         }
                                         let del_id_clone = del_id.clone();
+                                        let toast = toast_del.clone();
                                         glib::MainContext::default().spawn_local(async move {
-                                            let _ = secrets::delete_password(&del_id_clone).await;
+                                            if let Err(error) = secrets::delete_password(&del_id_clone).await {
+                                                toast.add_toast(adw::Toast::new(&format!("Connection deleted, but its stored password could not be removed: {:#}", error)));
+                                            }
                                         });
                                         list_box_del.remove(&sel_row_del);
                                         list_box_del.unselect_all();
@@ -1128,10 +1258,7 @@ impl MainWindow {
                                 .find(|c| c.id == id)
                                 .cloned();
                             if let Some(conn) = conn_opt {
-                                let pass = secrets::get_password_sync(&conn.id)
-                                    .unwrap_or(None)
-                                    .unwrap_or_default();
-                                launch_session_key(conn, pass);
+                                launch_with_stored_password(conn, launch_session_key.clone(), &toast_overlay_key);
                                 return glib::Propagation::Stop;
                             }
                         }
@@ -1169,10 +1296,7 @@ impl MainWindow {
                 child_opt = child.next_sibling();
             }
 
-            let password = secrets::get_password_sync(&conn.id)
-                .unwrap_or(None)
-                .unwrap_or_default();
-            launch_session(conn, password);
+            launch_with_stored_password(conn, launch_session.clone(), &toast_overlay);
         }
 
         window

@@ -7,7 +7,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use crate::models::{AppConfig, Connection};
+use crate::models::{sanitize_connections, AppConfig, Connection};
 
 /// Returns the configuration directory path (~/.config/ver).
 pub fn get_config_dir() -> Result<PathBuf> {
@@ -94,9 +94,7 @@ pub fn load_connections_from_path(path: &Path) -> Result<Vec<Connection>> {
     }
     match serde_json::from_str::<Vec<Connection>>(&content) {
         Ok(mut connections) => {
-            for conn in &mut connections {
-                conn.sanitize();
-            }
+            sanitize_connections(&mut connections);
             Ok(connections)
         }
         Err(e) => {
@@ -110,20 +108,34 @@ pub fn load_connections_from_path(path: &Path) -> Result<Vec<Connection>> {
 /// Saves connections to a specific file path atomically using 4-space indentation.
 /// Automatically creates parent directories if needed.
 pub fn save_connections_to_path(path: &Path, connections: &[Connection]) -> Result<()> {
+    let mut ids = std::collections::HashSet::new();
+    anyhow::ensure!(
+        connections.iter().all(|c| ids.insert(&c.id)),
+        "Connection IDs must be unique"
+    );
+    write_json_atomically(path, connections)
+}
+
+fn write_json_atomically<T: Serialize + ?Sized>(path: &Path, data: &T) -> Result<()> {
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
     fs::create_dir_all(parent)
         .with_context(|| format!("Failed to create directory structure for {:?}", parent))?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        let _ = fs::set_permissions(parent, fs::Permissions::from_mode(0o700));
+        fs::set_permissions(parent, fs::Permissions::from_mode(0o700))
+            .context("Failed to secure configuration directory")?;
     }
-    let json_str = to_json_4spaces(connections)?;
+    let json_str = to_json_4spaces(data)?;
     let mut temp_file = tempfile::NamedTempFile::new_in(parent)
         .with_context(|| format!("Failed to create temp file in {:?}", parent))?;
     temp_file
         .write_all(json_str.as_bytes())
         .with_context(|| format!("Failed to write to temp file for {:?}", path))?;
+    temp_file
+        .as_file()
+        .sync_all()
+        .context("Failed to sync configuration contents")?;
     temp_file
         .persist(path)
         .map_err(|e| e.error)
@@ -141,6 +153,26 @@ pub fn load_connections() -> Result<Vec<Connection>> {
 pub fn save_connections(connections: &[Connection]) -> Result<()> {
     let path = get_connections_file_path()?;
     save_connections_to_path(&path, connections)
+}
+
+/// Commit a proposed change only after its complete snapshot has been persisted.
+pub fn update_connections_at_path<T>(
+    path: &Path,
+    connections: &mut Vec<Connection>,
+    update: impl FnOnce(&mut Vec<Connection>) -> T,
+) -> Result<T> {
+    let mut proposed = connections.clone();
+    let result = update(&mut proposed);
+    save_connections_to_path(path, &proposed)?;
+    *connections = proposed;
+    Ok(result)
+}
+
+pub fn update_connections<T>(
+    connections: &mut Vec<Connection>,
+    update: impl FnOnce(&mut Vec<Connection>) -> T,
+) -> Result<T> {
+    update_connections_at_path(&get_connections_file_path()?, connections, update)
 }
 
 /// Loads app configuration from a specific file path.
@@ -183,25 +215,7 @@ pub fn load_config_from_path(path: &Path) -> Result<AppConfig> {
 /// Saves app configuration to a specific file path atomically using 4-space indentation.
 /// Automatically creates parent directories if needed.
 pub fn save_config_to_path(path: &Path, config: &AppConfig) -> Result<()> {
-    let parent = path.parent().unwrap_or_else(|| Path::new("."));
-    fs::create_dir_all(parent)
-        .with_context(|| format!("Failed to create directory structure for {:?}", parent))?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = fs::set_permissions(parent, fs::Permissions::from_mode(0o700));
-    }
-    let json_str = to_json_4spaces(config)?;
-    let mut temp_file = tempfile::NamedTempFile::new_in(parent)
-        .with_context(|| format!("Failed to create temp file in {:?}", parent))?;
-    temp_file
-        .write_all(json_str.as_bytes())
-        .with_context(|| format!("Failed to write to temp file for {:?}", path))?;
-    temp_file
-        .persist(path)
-        .map_err(|e| e.error)
-        .with_context(|| format!("Failed to persist temp file to {:?}", path))?;
-    Ok(())
+    write_json_atomically(path, config)
 }
 
 /// Loads app configuration from standard location (~/.config/ver/config.json).

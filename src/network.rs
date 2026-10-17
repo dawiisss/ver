@@ -1,5 +1,125 @@
 use std::net::UdpSocket;
 
+/// An explicitly selected IPv4 discovery range. Large scans require a smaller CIDR.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Ipv4Subnet {
+    network: u32,
+    prefix: u8,
+}
+
+impl std::str::FromStr for Ipv4Subnet {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        let (address, prefix) = value
+            .trim()
+            .split_once('/')
+            .ok_or("Enter an IPv4 subnet in CIDR notation, such as 192.168.1.0/24")?;
+        let address: std::net::Ipv4Addr = address.parse().map_err(|_| "Invalid IPv4 address")?;
+        let prefix: u8 = prefix.parse().map_err(|_| "Invalid subnet prefix")?;
+        if prefix > 32 {
+            return Err("Subnet prefix must be between 0 and 32".into());
+        }
+        let mask = u32::MAX.checked_shl(u32::from(32 - prefix)).unwrap_or(0);
+        Ok(Self {
+            network: u32::from(address) & mask,
+            prefix,
+        })
+    }
+}
+
+impl std::fmt::Display for Ipv4Subnet {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}/{}",
+            std::net::Ipv4Addr::from(self.network),
+            self.prefix
+        )
+    }
+}
+
+impl Ipv4Subnet {
+    pub fn hosts(self) -> Result<Vec<std::net::Ipv4Addr>, String> {
+        let size = 1u64 << (32 - self.prefix);
+        let count = if self.prefix < 31 { size - 2 } else { size };
+        if count > 4096 {
+            return Err(
+                "This subnet has more than 4096 hosts. Enter a smaller CIDR range to scan.".into(),
+            );
+        }
+        let start = u64::from(self.network) + u64::from(self.prefix < 31);
+        Ok((start..start + count)
+            .map(|address| std::net::Ipv4Addr::from(address as u32))
+            .collect())
+    }
+}
+
+/// Enumerate active IPv4 interfaces with their actual netmasks; never invent a fallback LAN.
+#[cfg(unix)]
+pub fn local_ipv4_subnets() -> Result<Vec<(String, Ipv4Subnet)>, String> {
+    struct Addresses(*mut libc::ifaddrs);
+    impl Drop for Addresses {
+        fn drop(&mut self) {
+            // SAFETY: getifaddrs allocated this list; this guard owns it exactly once.
+            unsafe {
+                libc::freeifaddrs(self.0);
+            }
+        }
+    }
+    let mut head = std::ptr::null_mut();
+    // SAFETY: head is a valid output pointer; the guard frees the returned list.
+    if unsafe { libc::getifaddrs(&mut head) } != 0 {
+        return Err(format!(
+            "Cannot enumerate network interfaces: {}",
+            std::io::Error::last_os_error()
+        ));
+    }
+    let addresses = Addresses(head);
+    let mut current = addresses.0;
+    let mut result = Vec::new();
+    while !current.is_null() {
+        // SAFETY: current is a live node in the owned getifaddrs list. The family check
+        // guarantees the address and netmask have sockaddr_in layout.
+        unsafe {
+            let interface = &*current;
+            if !interface.ifa_addr.is_null()
+                && !interface.ifa_netmask.is_null()
+                && !interface.ifa_name.is_null()
+                && (*interface.ifa_addr).sa_family == libc::AF_INET as libc::sa_family_t
+                && interface.ifa_flags & libc::IFF_UP as u32 != 0
+                && interface.ifa_flags & libc::IFF_LOOPBACK as u32 == 0
+            {
+                let address = &*(interface.ifa_addr as *const libc::sockaddr_in);
+                let netmask = &*(interface.ifa_netmask as *const libc::sockaddr_in);
+                let mask = u32::from_be(netmask.sin_addr.s_addr);
+                let prefix = mask.leading_ones() as u8;
+                let expected = u32::MAX.checked_shl(u32::from(32 - prefix)).unwrap_or(0);
+                if mask == expected {
+                    let subnet = Ipv4Subnet {
+                        network: u32::from_be(address.sin_addr.s_addr) & mask,
+                        prefix,
+                    };
+                    let name = std::ffi::CStr::from_ptr(interface.ifa_name)
+                        .to_string_lossy()
+                        .into_owned();
+                    if !result.iter().any(|(_, existing)| *existing == subnet) {
+                        result.push((name, subnet));
+                    }
+                }
+            }
+            current = interface.ifa_next;
+        }
+    }
+    result.sort_by(|a, b| a.0.cmp(&b.0));
+    Ok(result)
+}
+
+#[cfg(not(unix))]
+pub fn local_ipv4_subnets() -> Result<Vec<(String, Ipv4Subnet)>, String> {
+    Err("Automatic interface discovery is unavailable; enter an IPv4 CIDR range".into())
+}
+
 /// Default UDP port for Wake-on-LAN (Discard protocol port 9).
 pub const DEFAULT_WOL_PORT: u16 = 9;
 
@@ -17,6 +137,9 @@ pub fn parse_mac_address(mac_address: &str) -> Result<[u8; 6], String> {
         .filter(|c| !c.is_whitespace() && *c != ':' && *c != '-' && *c != '.')
         .collect();
 
+    if !clean.is_ascii() {
+        return Err("MAC addresses must contain only ASCII hex digits and separators".into());
+    }
     if clean.len() != 12 {
         return Err(format!(
             "Invalid MAC address length (expected 12 hex digits, found {}): '{}'",

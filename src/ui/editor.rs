@@ -43,17 +43,7 @@ impl ConnectionEditor {
     }
 
     pub fn validate(&self) -> Result<(), String> {
-        if self.connection.name.trim().is_empty() {
-            return Err("Connection name cannot be empty".to_string());
-        }
-        if self.connection.host.trim().is_empty() {
-            return Err("Host address cannot be empty".to_string());
-        }
-        if self.connection.port == 0 {
-            return Err("Port must be a valid number between 1 and 65535".to_string());
-        }
-        self.connection.validate_mac()?;
-        Ok(())
+        self.connection.validate()
     }
 
     /// Build full GTK4 / Libadwaita ConnectionEditor widget wrapper with form fields, switches, and action buttons.
@@ -769,7 +759,7 @@ impl ConnectionEditor {
                 },
             };
 
-            connection.validate_mac()?;
+            connection.validate()?;
 
             let pass = entry_password.text().to_string();
             Ok((connection, pass))
@@ -781,7 +771,6 @@ impl ConnectionEditor {
         btn_save.connect_clicked(move |_| match extract_for_save() {
             Ok((c, p)) => {
                 on_save(c, p);
-                toast_overlay_save.add_toast(adw::Toast::new("Connection saved successfully"));
             }
             Err(err) => {
                 toast_overlay_save.add_toast(adw::Toast::new(&err));
@@ -806,7 +795,6 @@ impl ConnectionEditor {
                 c.id = uuid::Uuid::new_v4().to_string();
                 c.name = format!("{} (Copy)", c.name);
                 on_duplicate(c, p);
-                toast_overlay_dup.add_toast(adw::Toast::new("Connection duplicated"));
             }
             Err(err) => {
                 toast_overlay_dup.add_toast(adw::Toast::new(&err));

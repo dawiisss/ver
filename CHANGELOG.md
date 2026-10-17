@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.5.2] - 2026-10-17
+
+### Security
+- Pass SPICE credentials as escaped connection settings over stdin, and remove `SPICE_PASSWORD` from the child environment.
+- Return and display keyring read, write, and deletion errors. Retry failed initialization and bound requests to 30 seconds.
+
+### Fixed
+- Load passwords asynchronously, guard against stale selection results, and preserve unread passwords when saving unrelated settings.
+- Commit connection changes to disk before updating in-memory state and sidebar rows. Keep import and Quick Connect entries open when saving fails.
+- Report preference save failures and restore their previous values.
+- Include ports in import conflict matching, repair duplicate IDs while preserving legacy keyring IDs, and assign unique names to repeated imports.
+- Reject malformed or unsupported JSON backup envelopes while continuing to accept earlier backups and unfinished connections.
+- Prevent non-ASCII MAC input from panicking during byte slicing and preserve significant password whitespace in Quick Connect.
+
+### Added
+- Discovery interface selection using actual IPv4 netmasks, editable CIDR ranges, scan progress, and cancellation. Limit individual scans to 4096 hosts.
+- Bounded session output queues, bounded reads for output without newlines, and retained log limits of 2000 lines and 256K characters with undo disabled.
+- Regression coverage for persistence failures, keyring failures, credential transport, import integrity, subnet ranges, and log limits. Live keyring integration tests are opt-in.
+
 ## [1.5.1] - 2026-10-13
 
 ### Security

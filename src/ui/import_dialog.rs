@@ -23,7 +23,7 @@ pub struct ImportDialog;
 impl ImportDialog {
     pub fn show<FImport>(parent: &impl IsA<gtk::Window>, on_import: FImport)
     where
-        FImport: Fn(Vec<Connection>, ImportConflictStrategy) + 'static,
+        FImport: Fn(Vec<Connection>, ImportConflictStrategy) -> bool + 'static,
     {
         let window = adw::Window::builder()
             .transient_for(parent)
@@ -42,6 +42,8 @@ impl ImportDialog {
 
         let toolbar_view = adw::ToolbarView::new();
         toolbar_view.add_top_bar(&header_bar);
+        let banner = adw::Banner::builder().revealed(false).build();
+        toolbar_view.add_top_bar(&banner);
 
         let content_box = gtk::Box::new(gtk::Orientation::Vertical, 12);
         content_box.set_margin_top(16);
@@ -293,6 +295,7 @@ impl ImportDialog {
         let refresh_browse = refresh_list.clone();
         let source_combo_browse = source_combo.clone();
         let window_browse = window.clone();
+        let banner_browse = banner.clone();
         browse_btn.connect_clicked(move |_| {
             let dialog = gtk::FileChooserNative::new(
                 Some("Select Configuration File to Import"),
@@ -305,77 +308,43 @@ impl ImportDialog {
             let candidates_inner = candidates_browse.clone();
             let refresh_inner = refresh_browse.clone();
             let source_idx = source_combo_browse.selected();
+            let banner_inner = banner_browse.clone();
 
             dialog.connect_response(move |d, response| {
                 if response == gtk::ResponseType::Accept {
                     if let Some(file) = d.file() {
                         if let Some(path) = file.path() {
-                            let mut found = Vec::new();
-                            match source_idx {
-                                0 => {
-                                    if let Ok(conn) = import_remmina_file(&path) {
-                                        let desc = path
-                                            .file_name()
-                                            .and_then(|s| s.to_str())
-                                            .unwrap_or("Remmina")
-                                            .to_string();
-                                        found.push(ImportCandidate {
-                                            connection: conn,
-                                            source_desc: desc,
-                                            selected: Rc::new(RefCell::new(true)),
-                                        });
-                                    }
+                            let result = match source_idx {
+                                0 => import_remmina_file(&path).map(|conn| vec![conn]),
+                                1 => import_ssh_config_file(&path),
+                                2 => import_rdp_file(&path).map(|conn| vec![conn]),
+                                _ => std::fs::read_to_string(&path)
+                                    .map_err(crate::importers::ImporterError::from)
+                                    .and_then(|content| import_connections_json(&content)),
+                            };
+                            let connections = match result {
+                                Ok(connections) => connections,
+                                Err(error) => {
+                                    banner_inner
+                                        .set_title(&format!("Could not import file: {}", error));
+                                    banner_inner.set_revealed(true);
+                                    return;
                                 }
-                                1 => {
-                                    if let Ok(conns) = import_ssh_config_file(&path) {
-                                        let desc = path
-                                            .file_name()
-                                            .and_then(|s| s.to_str())
-                                            .unwrap_or("SSH Config")
-                                            .to_string();
-                                        for conn in conns {
-                                            found.push(ImportCandidate {
-                                                connection: conn,
-                                                source_desc: desc.clone(),
-                                                selected: Rc::new(RefCell::new(true)),
-                                            });
-                                        }
-                                    }
-                                }
-                                2 => {
-                                    if let Ok(conn) = import_rdp_file(&path) {
-                                        let desc = path
-                                            .file_name()
-                                            .and_then(|s| s.to_str())
-                                            .unwrap_or("RDP File")
-                                            .to_string();
-                                        found.push(ImportCandidate {
-                                            connection: conn,
-                                            source_desc: desc,
-                                            selected: Rc::new(RefCell::new(true)),
-                                        });
-                                    }
-                                }
-                                3 => {
-                                    if let Ok(content) = std::fs::read_to_string(&path) {
-                                        if let Ok(conns) = import_connections_json(&content) {
-                                            let desc = path
-                                                .file_name()
-                                                .and_then(|s| s.to_str())
-                                                .unwrap_or("JSON Backup")
-                                                .to_string();
-                                            for conn in conns {
-                                                found.push(ImportCandidate {
-                                                    connection: conn,
-                                                    source_desc: desc.clone(),
-                                                    selected: Rc::new(RefCell::new(true)),
-                                                });
-                                            }
-                                        }
-                                    }
-                                }
-                                _ => {}
-                            }
+                            };
+                            banner_inner.set_revealed(false);
+                            let desc = path
+                                .file_name()
+                                .and_then(|s| s.to_str())
+                                .unwrap_or("Configuration")
+                                .to_string();
+                            let found = connections
+                                .into_iter()
+                                .map(|connection| ImportCandidate {
+                                    connection,
+                                    source_desc: desc.clone(),
+                                    selected: Rc::new(RefCell::new(true)),
+                                })
+                                .collect();
                             *candidates_inner.borrow_mut() = found;
                             refresh_inner();
                         }
@@ -432,11 +401,16 @@ impl ImportDialog {
                 .map(|c| c.connection.clone())
                 .collect();
 
-            if let Some(win) = win_import.upgrade() {
-                win.close();
+            if on_import(to_import, strategy) {
+                if let Some(win) = win_import.upgrade() {
+                    win.close();
+                }
+            } else {
+                banner.set_title(
+                    "Connections were not saved. Your selection is still available; please retry.",
+                );
+                banner.set_revealed(true);
             }
-
-            on_import(to_import, strategy);
         });
 
         window.present();

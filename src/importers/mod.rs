@@ -3,7 +3,7 @@ pub mod rdp_file;
 pub mod remmina;
 pub mod ssh_config;
 
-use crate::models::Connection;
+use crate::models::{sanitize_connections, Connection};
 use std::fmt;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -86,19 +86,21 @@ pub fn parse_host_port(server: &str, default_port: u16) -> (String, u16) {
 /// Returns (added_count, updated_count, skipped_count).
 pub fn merge_imported_connections(
     existing: &mut Vec<Connection>,
-    imported: Vec<Connection>,
+    mut imported: Vec<Connection>,
     strategy: ImportConflictStrategy,
 ) -> (usize, usize, usize) {
     let mut added = 0;
     let mut updated = 0;
     let mut skipped = 0;
+    sanitize_connections(&mut imported);
 
     for mut new_conn in imported {
         let existing_idx = existing.iter().position(|c| {
             c.id == new_conn.id
                 || (c.name.eq_ignore_ascii_case(&new_conn.name)
                     && c.host.eq_ignore_ascii_case(&new_conn.host)
-                    && c.protocol == new_conn.protocol)
+                    && c.protocol == new_conn.protocol
+                    && c.resolve_port() == new_conn.resolve_port())
         });
 
         match existing_idx {
@@ -113,7 +115,16 @@ pub fn merge_imported_connections(
                 }
                 ImportConflictStrategy::RenameWithSuffix => {
                     new_conn.id = uuid::Uuid::new_v4().to_string();
-                    new_conn.name = format!("{} (Imported)", new_conn.name);
+                    let base_name = new_conn.name.clone();
+                    new_conn.name = format!("{} (Imported)", base_name);
+                    let mut suffix = 2;
+                    while existing
+                        .iter()
+                        .any(|c| c.name.eq_ignore_ascii_case(&new_conn.name))
+                    {
+                        new_conn.name = format!("{} (Imported {})", base_name, suffix);
+                        suffix += 1;
+                    }
                     existing.push(new_conn);
                     added += 1;
                 }

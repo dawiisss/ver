@@ -1,4 +1,3 @@
-use local_ip_address::local_ip;
 use std::cell::RefCell;
 use std::net::{IpAddr, SocketAddr, TcpStream};
 use std::rc::Rc;
@@ -12,6 +11,13 @@ use libadwaita as adw;
 use libadwaita::prelude::*;
 
 use crate::models::{Connection, Protocol};
+use crate::network::{local_ipv4_subnets, Ipv4Subnet};
+
+enum ScanEvent {
+    Service(DiscoveredService),
+    Progress(usize, usize),
+    Complete,
+}
 
 #[derive(Debug, Clone)]
 pub struct DiscoveredService {
@@ -119,13 +125,15 @@ impl DiscoveryDialog {
         false
     }
 
+    // Keep compatibility with Rust 1.75, before integer is_multiple_of was stabilized.
+    #[allow(clippy::manual_is_multiple_of)]
     pub fn build_window<F, C>(
         parent: Option<&impl IsA<gtk::Window>>,
         is_already_added: C,
         on_add_callback: F,
     ) -> adw::Window
     where
-        F: Fn(Connection) + 'static,
+        F: Fn(Connection) -> bool + 'static,
         C: Fn(&DiscoveredService) -> bool + 'static,
     {
         let window = adw::Window::builder()
@@ -142,7 +150,7 @@ impl DiscoveryDialog {
         let header_bar = adw::HeaderBar::builder()
             .title_widget(&adw::WindowTitle::new(
                 "Network Discovery",
-                "Scanning local subnet",
+                "Choose a network or enter a CIDR range",
             ))
             .build();
 
@@ -151,6 +159,8 @@ impl DiscoveryDialog {
             .tooltip_text("Rescan Subnet")
             .build();
         header_bar.pack_end(&refresh_btn);
+        let cancel_btn = gtk::Button::builder().label("Cancel Scan").build();
+        header_bar.pack_end(&cancel_btn);
 
         let spinner = gtk::Spinner::builder()
             .spinning(true)
@@ -160,6 +170,8 @@ impl DiscoveryDialog {
 
         let status_label = gtk::Label::builder()
             .label("Scanning local network for VNC, RDP, SSH hosts...")
+            .wrap(true)
+            .hexpand(true)
             .css_classes(vec!["dim-label"])
             .build();
 
@@ -183,8 +195,52 @@ impl DiscoveryDialog {
             .child(&list_box)
             .build();
 
+        let (choices, description) = match local_ipv4_subnets() {
+            Ok(choices) => (
+                choices,
+                "Scan up to 4096 hosts per range. Choose a smaller CIDR for larger networks."
+                    .to_string(),
+            ),
+            Err(error) => (
+                Vec::new(),
+                format!("{}. Enter a CIDR range manually.", error),
+            ),
+        };
+        let labels: Vec<String> = choices
+            .iter()
+            .map(|(name, subnet)| format!("{} — {}", name, subnet))
+            .collect();
+        let labels_ref: Vec<&str> = labels.iter().map(String::as_str).collect();
+        let interface_row = adw::ComboRow::builder()
+            .title("Network Interface")
+            .model(&gtk::StringList::new(&labels_ref))
+            .build();
+        interface_row.set_sensitive(!choices.is_empty());
+        let subnet_entry = adw::EntryRow::builder()
+            .title("Subnet (IPv4 CIDR)")
+            .text(
+                choices
+                    .first()
+                    .map(|(_, subnet)| subnet.to_string())
+                    .unwrap_or_default(),
+            )
+            .build();
+        let subnet_for_selection = subnet_entry.clone();
+        interface_row.connect_selected_notify(move |row| {
+            if let Some((_, subnet)) = choices.get(row.selected() as usize) {
+                subnet_for_selection.set_text(&subnet.to_string());
+            }
+        });
+        let network_group = adw::PreferencesGroup::builder()
+            .description(&description)
+            .margin_start(12)
+            .margin_end(12)
+            .build();
+        network_group.add(&interface_row);
+        network_group.add(&subnet_entry);
         let main_box = gtk::Box::new(gtk::Orientation::Vertical, 0);
         main_box.append(&header_bar);
+        main_box.append(&network_group);
         main_box.append(&status_box);
         main_box.append(&scrolled);
 
@@ -193,13 +249,15 @@ impl DiscoveryDialog {
         let on_add = Rc::new(on_add_callback);
         let is_already_added = Rc::new(is_already_added);
         let locally_added: Rc<RefCell<Vec<DiscoveredService>>> = Rc::new(RefCell::new(Vec::new()));
+        let cancel_for_scan = cancel_btn.clone();
 
         let start_scan = move |list_box: gtk::ListBox,
                                spinner: gtk::Spinner,
                                status_label: gtk::Label,
                                on_add: Rc<F>,
                                is_already_added: Rc<C>,
-                               locally_added: Rc<RefCell<Vec<DiscoveredService>>>|
+                               locally_added: Rc<RefCell<Vec<DiscoveredService>>>,
+                               hosts: Vec<std::net::Ipv4Addr>|
               -> Arc<std::sync::atomic::AtomicBool> {
             let cancel_token = Arc::new(std::sync::atomic::AtomicBool::new(false));
             let cancel_token_rx = cancel_token.clone();
@@ -211,9 +269,10 @@ impl DiscoveryDialog {
             }
 
             spinner.set_spinning(true);
+            cancel_for_scan.set_sensitive(true);
             status_label.set_text("Scanning local network for VNC, RDP, SSH hosts...");
 
-            let (sender, receiver) = async_channel::unbounded::<Option<DiscoveredService>>();
+            let (sender, receiver) = async_channel::bounded::<ScanEvent>(64);
 
             let spinner_local = spinner.clone();
             let status_label_local = status_label.clone();
@@ -221,10 +280,12 @@ impl DiscoveryDialog {
             let on_add_local = on_add.clone();
             let is_already_added_local = is_already_added.clone();
             let locally_added_local = locally_added.clone();
+            let cancel_local = cancel_for_scan.clone();
 
             glib::MainContext::default().spawn_local(async move {
                 let mut found_count = 0usize;
                 let mut skipped_count = 0usize;
+                let mut completed = 0usize;
 
                 while let Ok(msg) = receiver.recv().await {
                     if cancel_token_rx.load(std::sync::atomic::Ordering::SeqCst) {
@@ -232,7 +293,7 @@ impl DiscoveryDialog {
                     }
 
                     match msg {
-                        Some(service) => {
+                        ScanEvent::Service(service) => {
                             let already_in_connections = is_already_added_local(&service);
                             let already_in_local = locally_added_local
                                 .borrow()
@@ -290,8 +351,11 @@ impl DiscoveryDialog {
                                 conn.port = service_clone.port;
                                 conn.group = "Discovered".to_string();
 
+                                if !on_add_clone(conn) {
+                                    status_label_for_add.set_text("Could not save this device. Retry after resolving the save error.");
+                                    return;
+                                }
                                 locally_added_for_add.borrow_mut().push(service_clone.clone());
-                                on_add_clone(conn);
 
                                 list_box_for_add.remove(&row_for_add);
                                 if list_box_for_add.first_child().is_none() {
@@ -309,8 +373,13 @@ impl DiscoveryDialog {
                             row.add_suffix(&add_btn);
                             list_box_local.append(&row);
                         }
-                        None => {
+                        ScanEvent::Progress(done, total) => {
+                            completed = completed.max(done);
+                            status_label_local.set_text(&format!("Scanning hosts: {}/{} · {} new services", completed, total, found_count));
+                        }
+                        ScanEvent::Complete => {
                             spinner_local.set_spinning(false);
+                            cancel_local.set_sensitive(false);
                             if found_count == 0 {
                                 if skipped_count > 0 {
                                     let msg = if skipped_count == 1 {
@@ -349,101 +418,60 @@ impl DiscoveryDialog {
 
             // Spawn scanner thread pool
             thread::spawn(move || {
-                let targets = vec![("localhost", "127.0.0.1")];
-
-                // Standard ports to probe: (Port, Protocol Name)
-                let ports: &[(u16, &str)] = &[(5900, "vnc"), (3389, "rdp"), (22, "ssh")];
-
-                // Probe local targets
-                for (name, ip_str) in targets {
-                    if cancel_token_thread.load(std::sync::atomic::Ordering::SeqCst) {
-                        let _ = sender.send_blocking(None);
-                        return;
-                    }
-                    if let Ok(ip) = ip_str.parse::<IpAddr>() {
-                        for &(port, proto) in ports {
-                            let addr = SocketAddr::new(ip, port);
-                            if TcpStream::connect_timeout(&addr, Duration::from_millis(150)).is_ok()
-                            {
-                                let service = DiscoveredService {
-                                    name: format!("{} ({})", name, proto.to_uppercase()),
-                                    protocol: proto.to_string(),
-                                    host: ip_str.to_string(),
-                                    port,
-                                };
-                                let _ = sender.send_blocking(Some(service));
-                            }
-                        }
-                    }
-                }
-
-                // Subnet sweep
-                let mut subnet_prefix = "192.168.1".to_string(); // Fallback
-                if let Ok(my_ip) = local_ip() {
-                    match my_ip {
-                        IpAddr::V4(ipv4) => {
-                            let octets = ipv4.octets();
-                            subnet_prefix = format!("{}.{}.{}", octets[0], octets[1], octets[2]);
-                        }
-                        IpAddr::V6(_) => {}
-                    }
-                }
-
-                let (host_tx, host_rx) = async_channel::unbounded::<u8>();
-                for host_id in 1..=254 {
-                    let _ = host_tx.send_blocking(host_id);
+                let mut targets = hosts;
+                targets.push(std::net::Ipv4Addr::LOCALHOST);
+                targets.sort_unstable();
+                targets.dedup();
+                let total = targets.len();
+                let completed = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+                let (host_tx, host_rx) = async_channel::unbounded::<std::net::Ipv4Addr>();
+                for host in targets {
+                    let _ = host_tx.send_blocking(host);
                 }
                 drop(host_tx);
-
-                let num_workers = 16;
                 let mut handles = vec![];
-                for _ in 0..num_workers {
-                    let host_rx_clone = host_rx.clone();
-                    let prefix = subnet_prefix.clone();
-                    let sender_clone = sender.clone();
-                    let cancel_worker = cancel_token_thread.clone();
-
-                    let handle = thread::spawn(move || {
-                        while let Ok(host_id) = host_rx_clone.recv_blocking() {
-                            if cancel_worker.load(std::sync::atomic::Ordering::SeqCst) {
-                                break;
-                            }
-                            let ip_str = format!("{}.{}", prefix, host_id);
-                            if let Ok(ip) = ip_str.parse::<IpAddr>() {
-                                let ports: &[(u16, &str)] =
-                                    &[(5900, "vnc"), (3389, "rdp"), (22, "ssh")];
-                                for &(port, proto) in ports {
-                                    if cancel_worker.load(std::sync::atomic::Ordering::SeqCst) {
-                                        break;
-                                    }
-                                    let addr = SocketAddr::new(ip, port);
-                                    if TcpStream::connect_timeout(&addr, Duration::from_millis(150))
-                                        .is_ok()
-                                    {
-                                        let service = DiscoveredService {
-                                            name: format!(
-                                                "Host {} ({})",
-                                                ip_str,
-                                                proto.to_uppercase()
-                                            ),
-                                            protocol: proto.to_string(),
-                                            host: ip_str.clone(),
-                                            port,
-                                        };
-                                        let _ = sender_clone.send_blocking(Some(service));
+                for _ in 0..16 {
+                    let host_rx = host_rx.clone();
+                    let sender = sender.clone();
+                    let cancel = cancel_token_thread.clone();
+                    let completed = completed.clone();
+                    handles.push(thread::spawn(move || {
+                        while let Ok(ip) = host_rx.recv_blocking() {
+                            for (port, protocol) in [(5900, "vnc"), (3389, "rdp"), (22, "ssh")] {
+                                if cancel.load(std::sync::atomic::Ordering::SeqCst) {
+                                    return;
+                                }
+                                let addr = SocketAddr::new(IpAddr::V4(ip), port);
+                                if TcpStream::connect_timeout(&addr, Duration::from_millis(150))
+                                    .is_ok()
+                                {
+                                    let service = DiscoveredService {
+                                        name: format!("Host {} ({})", ip, protocol.to_uppercase()),
+                                        protocol: protocol.into(),
+                                        host: ip.to_string(),
+                                        port,
+                                    };
+                                    if sender.send_blocking(ScanEvent::Service(service)).is_err() {
+                                        return;
                                     }
                                 }
                             }
+                            let done =
+                                completed.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+                            if (done % 16 == 0 || done == total)
+                                && sender
+                                    .send_blocking(ScanEvent::Progress(done, total))
+                                    .is_err()
+                            {
+                                return;
+                            }
                         }
-                    });
-                    handles.push(handle);
+                    }));
                 }
-
                 for handle in handles {
                     let _ = handle.join();
                 }
-
-                let _ = sender.send_blocking(None);
+                let _ = sender.send_blocking(ScanEvent::Complete);
             });
 
             cancel_token
@@ -461,12 +489,27 @@ impl DiscoveryDialog {
             let is_already_added = is_already_added.clone();
             let locally_added = locally_added.clone();
             let current_cancel = current_cancel_token.clone();
+            let subnet_entry = subnet_entry.clone();
+            let cancel = cancel_btn.clone();
 
             move || {
                 // Cancel any ongoing scan first
                 if let Some(prev_token) = current_cancel.lock().unwrap().take() {
                     prev_token.store(true, std::sync::atomic::Ordering::SeqCst);
                 }
+                let hosts = match subnet_entry
+                    .text()
+                    .parse::<Ipv4Subnet>()
+                    .and_then(Ipv4Subnet::hosts)
+                {
+                    Ok(hosts) => hosts,
+                    Err(error) => {
+                        cancel.set_sensitive(false);
+                        spinner.set_spinning(false);
+                        status_label.set_text(&error);
+                        return;
+                    }
+                };
                 let token = start_scan(
                     list_box.clone(),
                     spinner.clone(),
@@ -474,11 +517,25 @@ impl DiscoveryDialog {
                     on_add.clone(),
                     is_already_added.clone(),
                     locally_added.clone(),
+                    hosts,
                 );
                 *current_cancel.lock().unwrap() = Some(token);
             }
         };
 
+        {
+            let token = current_cancel_token.clone();
+            let spinner = spinner.clone();
+            let status = status_label.clone();
+            cancel_btn.connect_clicked(move |button| {
+                button.set_sensitive(false);
+                if let Some(token) = token.lock().unwrap().take() {
+                    token.store(true, std::sync::atomic::Ordering::SeqCst);
+                }
+                spinner.set_spinning(false);
+                status.set_text("Scan cancelled. Discovered services are still available.");
+            });
+        }
         run_scan();
 
         {
@@ -506,7 +563,6 @@ impl DiscoveryDialog {
 mod tests {
     use super::*;
     use crate::models::{Connection, Protocol};
-
     #[test]
     fn test_service_matching_ssh() {
         let mut conn = Connection::new_with_protocol(Protocol::Ssh);

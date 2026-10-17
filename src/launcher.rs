@@ -373,7 +373,11 @@ pub fn launch_rdp(conn: &Connection, password: Option<&str>) -> Result<Child, St
     if let Some(pass) = password.filter(|p| !p.is_empty()) {
         if let Some(mut stdin) = child.stdin.take() {
             use std::io::Write;
-            let _ = writeln!(stdin, "{}", pass);
+            if let Err(error) = writeln!(stdin, "{}", pass) {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(format!("Failed to send RDP credentials: {}", error));
+            }
         }
     }
 
@@ -608,38 +612,123 @@ pub fn launch_vnc_with_binary(
 
 /// Spawns a `remote-viewer` SPICE session detached from parent process group.
 pub fn launch_spice(conn: &Connection, password: Option<&str>) -> Result<Child, String> {
-    if conn.host.trim().is_empty() {
-        return Err("Connection host cannot be empty".to_string());
+    launch_spice_with_binary(conn, password, "remote-viewer")
+}
+
+fn spice_connection_data(conn: &Connection, password: &str) -> String {
+    // GKeyFile escapes newlines, backslashes and leading spaces in each value.
+    let settings = gtk::glib::KeyFile::new();
+    settings.set_string("virt-viewer", "type", "spice");
+    settings.set_string(
+        "virt-viewer",
+        "host",
+        conn.host.trim().trim_matches(['[', ']']),
+    );
+    settings.set_integer("virt-viewer", "port", i32::from(conn.resolve_port()));
+    settings.set_string("virt-viewer", "password", password);
+    settings.to_data().to_string()
+}
+
+fn spice_command(conn: &Connection, has_password: bool, binary: &str) -> Command {
+    let mut args = build_spice_args(conn);
+    if has_password {
+        // remote-viewer accepts a connection settings file from stdin with URI '-'.
+        *args.last_mut().expect("SPICE arguments include a URI") = "-".into();
     }
-
-    let args = build_spice_args(conn);
-    let mut cmd = Command::new("remote-viewer");
-
-    if let Some(pass) = password {
-        if !pass.is_empty() {
-            cmd.env("SPICE_PASSWORD", pass);
-        }
-    }
-
-    cmd.args(&args)
-        .stdin(Stdio::null())
+    let mut cmd = Command::new(binary);
+    cmd.env_remove("SPICE_PASSWORD")
+        .args(args)
+        .stdin(if has_password {
+            Stdio::piped()
+        } else {
+            Stdio::null()
+        })
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt;
         cmd.process_group(0);
     }
+    cmd
+}
 
-    cmd.spawn()
-        .map_err(|e| format!("Failed to spawn remote-viewer process: {}", e))
+fn launch_spice_with_binary(
+    conn: &Connection,
+    password: Option<&str>,
+    binary: &str,
+) -> Result<Child, String> {
+    if conn.host.trim().is_empty() {
+        return Err("Connection host cannot be empty".to_string());
+    }
+
+    let password = password.filter(|p| !p.is_empty());
+    let mut child = spice_command(conn, password.is_some(), binary)
+        .spawn()
+        .map_err(|e| format!("Failed to spawn remote-viewer process: {}", e))?;
+    if let Some(password) = password {
+        use std::io::Write;
+        let data = spice_connection_data(conn, password);
+        if let Some(mut stdin) = child.stdin.take() {
+            if let Err(error) = stdin.write_all(data.as_bytes()) {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(format!("Failed to send SPICE credentials: {}", error));
+            }
+        }
+    }
+    Ok(child)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::models::Protocol;
+
+    #[test]
+    fn spice_credentials_are_escaped_and_sent_only_through_stdin() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let shim = dir.path().join("remote-viewer");
+        std::fs::write(&shim, "#!/bin/sh\ncat\n").unwrap();
+        std::fs::set_permissions(&shim, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let conn = Connection {
+            host: "2001:db8::1".into(),
+            protocol: Protocol::Spice,
+            port: 5901,
+            ..Default::default()
+        };
+        let password = " leading \\secret\n[virt-viewer]\nhost=attacker\r\n尾 ";
+        let cmd = spice_command(&conn, true, shim.to_str().unwrap());
+        assert_eq!(cmd.get_args().last().unwrap(), "-");
+        assert!(cmd
+            .get_args()
+            .all(|arg| !arg.to_string_lossy().contains("secret")));
+        assert!(cmd
+            .get_envs()
+            .any(|(key, value)| key == "SPICE_PASSWORD" && value.is_none()));
+        let output = launch_spice_with_binary(&conn, Some(password), shim.to_str().unwrap())
+            .unwrap()
+            .wait_with_output()
+            .unwrap();
+        assert!(output.status.success());
+        let settings = gtk::glib::KeyFile::new();
+        settings
+            .load_from_data(
+                std::str::from_utf8(&output.stdout).unwrap(),
+                gtk::glib::KeyFileFlags::NONE,
+            )
+            .unwrap();
+        assert_eq!(
+            settings.string("virt-viewer", "password").unwrap(),
+            password
+        );
+        assert_eq!(
+            settings.string("virt-viewer", "host").unwrap(),
+            "2001:db8::1"
+        );
+        assert_eq!(settings.integer("virt-viewer", "port").unwrap(), 5901);
+    }
 
     #[test]
     fn test_build_rdp_args_standard() {

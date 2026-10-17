@@ -65,7 +65,7 @@ pub fn parse_quick_connect(input: &str, default_proto: Protocol) -> Result<Conne
         host.clone()
     };
 
-    Ok(Connection {
+    let connection = Connection {
         id: uuid::Uuid::new_v4().to_string(),
         name,
         protocol,
@@ -75,7 +75,9 @@ pub fn parse_quick_connect(input: &str, default_proto: Protocol) -> Result<Conne
         mac_address: String::new(),
         group: "Quick Connect".to_string(),
         advanced_settings: AdvancedSettings::default(),
-    })
+    };
+    connection.validate()?;
+    Ok(connection)
 }
 
 fn parse_host_and_port(input: &str, default_port: u16) -> Result<(String, u16), String> {
@@ -122,7 +124,7 @@ impl QuickConnectDialog {
         on_save_connect: FSaveConnect,
     ) where
         FConnect: Fn(Connection, Option<String>) + 'static,
-        FSaveConnect: Fn(Connection, Option<String>) + 'static,
+        FSaveConnect: Fn(Connection, Option<String>) -> bool + 'static,
     {
         let window = adw::Window::builder()
             .transient_for(parent)
@@ -312,7 +314,7 @@ impl QuickConnectDialog {
 
                 let port = port_row.value() as u16;
                 let username = user_row.text().trim().to_string();
-                let password_text = pass_row.text().trim().to_string();
+                let password_text = pass_row.text().to_string();
                 let password = if password_text.is_empty() {
                     None
                 } else {
@@ -337,6 +339,7 @@ impl QuickConnectDialog {
                     advanced_settings: AdvancedSettings::default(),
                 };
 
+                conn.validate()?;
                 Ok((conn, password))
             }
         };
@@ -368,10 +371,12 @@ impl QuickConnectDialog {
         save_connect_btn.connect_clicked(move |_| match get_connection() {
             Ok((conn, pass)) => {
                 banner_save.set_revealed(false);
-                if let Some(win) = win_weak_save.upgrade() {
-                    win.close();
+                if on_save_connect(conn, pass) {
+                    if let Some(win) = win_weak_save.upgrade() { win.close(); }
+                } else {
+                    banner_save.set_title("Could not save the connection. Your entries are still available; please retry.");
+                    banner_save.set_revealed(true);
                 }
-                on_save_connect(conn, pass);
             }
             Err(e) => {
                 banner_save.set_title(&e);

@@ -74,31 +74,31 @@ wget -qO- https://raw.githubusercontent.com/dawiisss/ver/main/install.sh | bash
 * **Remmina Migration**: Auto-scan `~/.local/share/remmina/*.remmina` profiles or import individual files with automatic extraction of display depths, audio redirection, multimon, and SSH keys.
 * **OpenSSH `~/.ssh/config`**: Auto-detects and imports host blocks, hostnames, usernames, custom ports, and expanded identity files (`~/.ssh/id_*`).
 * **Microsoft `.rdp` Support**: Seamless import and export of standard Windows Remote Desktop `.rdp` configuration files.
-* **JSON Backups**: Full encrypted-password-safe JSON library backups with schema versioning and timestamp metadata.
+* **JSON Backups**: Connection settings with an explicit schema version and timestamp. Passwords stay in the system keyring and are excluded from backups.
 * **Selective Export (<kbd>Ctrl+E</kbd>)**: Granular multi-selection checklist with "Select All" / "Deselect All", dynamic counter, and smart focus pre-selection.
 * **Conflict Resolution**: Choose between *Skip Duplicates*, *Overwrite Existing*, or *Keep Both (Rename with Suffix)* when importing.
 
 ### Local Network & Service Discovery (<kbd>Ctrl+D</kbd>)
-* **Subnet Scanning**: Automatically probes your local network interfaces and subnets for active RDP (3389), VNC (5900), and SSH (22) services.
+* **Subnet Scanning**: Choose an active IPv4 interface using its actual subnet mask, or enter a CIDR range, to discover RDP (3389), VNC (5900), and SSH (22) services. Scans show progress, can be cancelled, and support up to 4096 hosts per range; larger networks require a smaller CIDR selection.
 * **Smart Deduplication**: Automatically detects and hides machines already added to your connections list (matching host, port, protocol, and localhost equivalents) so only new, unconfigured services appear.
 * **One-Click Import**: Quickly add discovered network machines directly into your connection inventory, immediately removing them from the discovered section.
 
 ### Multi-Protocol Support
 * **RDP & XRDP**: Powered by `xfreerdp3` with support for dynamic resolution, multimon, audio redirection, clipboard sharing, gateway servers, shared folders, security protocol negotiation (NLA, TLS, RDP, ExtNLA), and certificate verification policies (TOFU, Strict Deny, Ignore).
 * **VNC**: Seamless integration with `vncviewer` with automated credential passing and color level selection.
-* **SPICE**: High-performance hypervisor and VM streaming via `remote-viewer`.
+* **SPICE**: Hypervisor and VM streaming via `remote-viewer`, with saved credentials passed through its [stdin connection settings interface](https://gitlab.com/virt-viewer/virt-viewer/-/raw/master/man/remote-viewer.pod). Passwords are excluded from command arguments and the child environment.
 * **SSH**: Direct launch into your favorite desktop terminal emulator (`ptyxis`, `kgx`, `gnome-terminal`, `konsole`, `alacritty`, `foot`, `wezterm`, `xterm`) with custom private key identity paths (`-i`).
 
 ### Enterprise-Grade Security
 * **RDP Stdin Credential Hardening**: Passwords are piped over standard input via `xfreerdp3 /from-stdin:force`, eliminating credential exposure in `/proc/<pid>/cmdline` and process monitoring utilities (`ps`, `top`).
-* **Secret Service Keyring Integration**: Securely store connection passwords in your native system keyring (`gnome-keyring`, `kwallet`, `keepassxc`) via the Freedesktop Secret Service API (`oo7`).
+* **Secret Service Keyring Integration**: Store connection passwords in your native system keyring (`gnome-keyring`, `kwallet`, `keepassxc`) via the Freedesktop Secret Service API (`oo7`). Requests run asynchronously with a 30-second timeout. Failed password writes and deletions are reported, and failed initialization can be retried.
 * **Configuration Hardening**: Strict `0700` Unix directory permissions on all user configuration paths (`~/.config/ver`).
 * **Safe Process Group Signaling**: Process group signal termination (`-(pid as i32)`) with PID validity and liveness guards ensures child shells, SSH sessions, and terminal wrappers exit cleanly without orphan processes or accidental self-termination.
 * **Corrupt File Auto-Recovery & User Alerting**: Automatic timestamped backup creation for non-UTF8 or malformed configuration files with proactive GUI warning notifications preventing accidental data loss.
 
 ### Active Session Tracking & System Tray
 * **Live Session Badges**: Real-time "Active" sidebar indicators showing currently connected sessions.
-* **Session Logs**: Embedded log view streaming live process output and connection events.
+* **Session Logs**: Embedded log view with a bounded event queue, retaining the latest 2000 lines within a 256K-character limit. Undo history is disabled to avoid retaining discarded output.
 * **System Tray Indicator**: Background StatusNotifierItem tray icon with embedded in-memory ARGB32 pixmap and theme fallback for quick window toggle and persistent daemon mode.
 
 ### Blazing Fast & Memory Efficient
@@ -151,7 +151,7 @@ Installs the binary to `/usr/local/bin/ver` and desktop launchers to `/usr/local
 #### Install Options & Version Pinning:
 ```bash
 # Install a specific release version
-curl -fsSL https://raw.githubusercontent.com/dawiisss/ver/main/install.sh | bash -s -- --version v1.5.1
+curl -fsSL https://raw.githubusercontent.com/dawiisss/ver/main/install.sh | bash -s -- --version v1.5.2
 
 # Install to a custom prefix directory
 ./install.sh --prefix /opt/ver
@@ -249,6 +249,12 @@ Run the complete test suite across all unit, boundary, network, prober, and UI t
 ```bash
 cargo test --all-targets
 ```
+
+Tests that need a live, unlocked Secret Service keyring are opt-in. They use test-specific IDs; run them separately with:
+```bash
+cargo test --all-targets -- --ignored
+```
+The default suite tests unavailable-keyring errors in a separate process with an isolated D-Bus address. Network tests need permission to bind loopback sockets.
 
 Verify linter compliance:
 ```bash

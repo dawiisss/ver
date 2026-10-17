@@ -289,6 +289,12 @@ impl AdvancedSettings {
             self.color_depth = 0;
             modified = true;
         }
+        for level in [&mut self.vnc_compress_level, &mut self.vnc_quality_level] {
+            if *level > 9 {
+                *level = 0;
+                modified = true;
+            }
+        }
         modified
     }
 }
@@ -349,6 +355,40 @@ impl Default for Connection {
 }
 
 impl Connection {
+    /// Validate a configured endpoint. Draft connections may be saved before this succeeds.
+    pub fn validate(&self) -> Result<(), String> {
+        if self.name.trim().is_empty() {
+            return Err("Connection name cannot be empty".into());
+        }
+        let host = self.host.trim();
+        if host.is_empty() || host.chars().any(|c| c.is_whitespace() || c.is_control()) {
+            return Err("Host must be a hostname or IP address without whitespace".into());
+        }
+        if self.port == 0 {
+            return Err("Port must be a valid number between 1 and 65535".into());
+        }
+        self.validate_fields()
+    }
+
+    /// Validate persisted fields while permitting an unfinished connection with no host.
+    pub fn validate_fields(&self) -> Result<(), String> {
+        if self
+            .host
+            .trim()
+            .chars()
+            .any(|c| c.is_whitespace() || c.is_control())
+        {
+            return Err("Host must be a hostname or IP address without whitespace".into());
+        }
+        if self.advanced_settings.vnc_compress_level > 9
+            || self.advanced_settings.vnc_quality_level > 9
+        {
+            return Err("VNC compression and quality must be between 0 and 9".into());
+        }
+        self.validate_mac()?;
+        Ok(())
+    }
+
     pub fn new() -> Self {
         Self::default()
     }
@@ -414,6 +454,26 @@ impl Connection {
         let mac_bytes = crate::network::parse_mac_address(trimmed)?;
         let formatted: String = mac_bytes.iter().map(|b| format!("{:02X}", b)).collect();
         Ok(Some(formatted))
+    }
+}
+
+/// Preserve legacy IDs (and their keyring links), replacing only unsafe or duplicate IDs.
+pub fn sanitize_connections(connections: &mut [Connection]) {
+    use std::collections::HashSet;
+    let mut reserved: HashSet<String> = connections.iter().map(|c| c.id.clone()).collect();
+    let mut seen = HashSet::new();
+    for conn in connections {
+        conn.sanitize();
+        if seen.contains(&conn.id) {
+            loop {
+                conn.id = Uuid::new_v4().to_string();
+                if !reserved.contains(&conn.id) {
+                    break;
+                }
+            }
+        }
+        reserved.insert(conn.id.clone());
+        seen.insert(conn.id.clone());
     }
 }
 

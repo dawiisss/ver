@@ -131,6 +131,7 @@ fn test_t2_boundary_unicode_connection_fields() {
 }
 
 #[test]
+#[ignore = "Requires an unlocked Secret Service keyring"]
 fn test_t2_boundary_missing_keyring_item_returns_none() {
     let result = secrets::get_password_sync("non-existent-uuid-999999").expect("Should not fail");
     assert_eq!(result, None);

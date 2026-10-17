@@ -2,7 +2,7 @@ use gtk::glib;
 use gtk::prelude::*;
 use libadwaita as adw;
 use libadwaita::prelude::*;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use crate::models::{AppConfig, Protocol, VncColorLevel};
@@ -20,6 +20,28 @@ pub fn apply_theme(theme_str: &str) {
             _ => style_manager.set_color_scheme(adw::ColorScheme::Default),
         }
     });
+}
+
+fn persist_preferences(
+    config: &Rc<RefCell<AppConfig>>,
+    window: &adw::PreferencesWindow,
+    update: impl FnOnce(&mut AppConfig),
+) -> bool {
+    let mut proposed = config.borrow().clone();
+    update(&mut proposed);
+    match save_config(&proposed) {
+        Ok(()) => {
+            *config.borrow_mut() = proposed;
+            true
+        }
+        Err(error) => {
+            window.add_toast(adw::Toast::new(&format!(
+                "Preferences were not saved: {:#}",
+                error
+            )));
+            false
+        }
+    }
 }
 
 pub struct PreferencesWindow;
@@ -62,16 +84,36 @@ impl PreferencesWindow {
             .selected(selected_theme_idx)
             .build();
 
+        let changing = Rc::new(Cell::new(false));
+        let changing_1 = changing.clone();
+        let window_1 = window.downgrade();
         let config_clone_1 = config.clone();
         combo_theme.connect_selected_notify(move |row| {
+            if changing_1.get() {
+                return;
+            }
+            let Some(window) = window_1.upgrade() else {
+                return;
+            };
+            let old = match config_clone_1.borrow().theme.as_str() {
+                "dark" => 1,
+                "light" => 2,
+                _ => 0,
+            };
             let theme = match row.selected() {
                 1 => "dark",
                 2 => "light",
                 _ => "system",
             };
-            config_clone_1.borrow_mut().theme = theme.to_string();
-            apply_theme(theme);
-            let _ = save_config(&config_clone_1.borrow());
+            if persist_preferences(&config_clone_1, &window, |config| {
+                config.theme = theme.to_string()
+            }) {
+                apply_theme(theme);
+            } else {
+                changing_1.set(true);
+                row.set_selected(old);
+                changing_1.set(false);
+            }
         });
 
         group_appearance.add(&combo_theme);
@@ -98,8 +140,23 @@ impl PreferencesWindow {
             .selected(default_proto_idx)
             .build();
 
+        let changing_2 = changing.clone();
+        let window_2 = window.downgrade();
         let config_clone_2 = config.clone();
         combo_proto.connect_selected_notify(move |row| {
+            if changing_2.get() {
+                return;
+            }
+            let Some(window) = window_2.upgrade() else {
+                return;
+            };
+            let old = match config_clone_2.borrow().default_protocol {
+                Protocol::Rdp => 0,
+                Protocol::Vnc => 1,
+                Protocol::Ssh => 2,
+                Protocol::Spice => 3,
+                Protocol::Xrdp => 4,
+            };
             let proto = match row.selected() {
                 1 => Protocol::Vnc,
                 2 => Protocol::Ssh,
@@ -107,8 +164,13 @@ impl PreferencesWindow {
                 4 => Protocol::Xrdp,
                 _ => Protocol::Rdp,
             };
-            config_clone_2.borrow_mut().default_protocol = proto;
-            let _ = save_config(&config_clone_2.borrow());
+            if !persist_preferences(&config_clone_2, &window, |config| {
+                config.default_protocol = proto
+            }) {
+                changing_2.set(true);
+                row.set_selected(old);
+                changing_2.set(false);
+            }
         });
 
         group_defaults.add(&combo_proto);
@@ -120,10 +182,24 @@ impl PreferencesWindow {
             .active(config.borrow().auto_connect_last)
             .build();
 
+        let changing_3 = changing.clone();
+        let window_3 = window.downgrade();
         let config_clone_3 = config.clone();
         switch_autoconnect.connect_active_notify(move |row| {
-            config_clone_3.borrow_mut().auto_connect_last = row.is_active();
-            let _ = save_config(&config_clone_3.borrow());
+            if changing_3.get() {
+                return;
+            }
+            let Some(window) = window_3.upgrade() else {
+                return;
+            };
+            let old = config_clone_3.borrow().auto_connect_last;
+            if !persist_preferences(&config_clone_3, &window, |config| {
+                config.auto_connect_last = row.is_active()
+            }) {
+                changing_3.set(true);
+                row.set_active(old);
+                changing_3.set(false);
+            }
         });
 
         group_defaults.add(&switch_autoconnect);
@@ -144,16 +220,35 @@ impl PreferencesWindow {
             .selected(default_color_idx)
             .build();
 
+        let changing_4 = changing.clone();
+        let window_4 = window.downgrade();
         let config_clone_4 = config.clone();
         combo_color.connect_selected_notify(move |row| {
+            if changing_4.get() {
+                return;
+            }
+            let Some(window) = window_4.upgrade() else {
+                return;
+            };
+            let old = match config_clone_4.borrow().default_vnc_color_level {
+                VncColorLevel::Full => 0,
+                VncColorLevel::Medium => 1,
+                VncColorLevel::Low => 2,
+                VncColorLevel::VeryLow => 3,
+            };
             let color_level = match row.selected() {
                 1 => VncColorLevel::Medium,
                 2 => VncColorLevel::Low,
                 3 => VncColorLevel::VeryLow,
                 _ => VncColorLevel::Full,
             };
-            config_clone_4.borrow_mut().default_vnc_color_level = color_level;
-            let _ = save_config(&config_clone_4.borrow());
+            if !persist_preferences(&config_clone_4, &window, |config| {
+                config.default_vnc_color_level = color_level
+            }) {
+                changing_4.set(true);
+                row.set_selected(old);
+                changing_4.set(false);
+            }
         });
 
         group_defaults.add(&combo_color);
