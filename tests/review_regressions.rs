@@ -196,3 +196,45 @@ fn hosts_that_look_like_options_are_rejected() {
     assert!(import_connections_json(r#"[{"protocol":"vnc","host":"-via=x"}]"#).is_err());
     assert!(ver::launcher::launch_vnc(&conn, None).is_err());
 }
+
+#[test]
+fn overwrite_of_different_endpoint_or_identity_rotates_credential_id() {
+    let original = endpoint(22);
+    let original_id = original.id.clone();
+    let overwrite = |imported: Connection| {
+        let mut existing = vec![original.clone()];
+        let counts = merge_imported_connections(
+            &mut existing,
+            vec![imported],
+            ImportConflictStrategy::Overwrite,
+        );
+        assert_eq!(counts, (0, 1, 0));
+        existing.remove(0).id
+    };
+
+    // Matched by ID (as in a JSON backup) but pointing at another server.
+    let mut moved = original.clone();
+    moved.host = "other.example.test".into();
+    assert_ne!(overwrite(moved), original_id);
+
+    let mut new_user = original.clone();
+    new_user.username = "new-user".into();
+    assert_ne!(overwrite(new_user), original_id);
+
+    let mut tunneled = original.clone();
+    tunneled.protocol = Protocol::Vnc;
+    let mut tunneled_elsewhere = tunneled.clone();
+    tunneled_elsewhere.advanced_settings.ssh_tunnel_host = "gateway.example.test".into();
+    let mut existing = vec![tunneled.clone()];
+    merge_imported_connections(
+        &mut existing,
+        vec![tunneled_elsewhere],
+        ImportConflictStrategy::Overwrite,
+    );
+    assert_ne!(existing[0].id, tunneled.id);
+
+    let mut renamed_only = original.clone();
+    renamed_only.group = "Elsewhere".into();
+    renamed_only.host = "EXAMPLE.test".into();
+    assert_eq!(overwrite(renamed_only), original_id);
+}

@@ -82,7 +82,22 @@ pub fn parse_host_port(server: &str, default_port: u16) -> (String, u16) {
     (trimmed.to_string(), default_port)
 }
 
+/// Whether a saved password for `previous` could be sent somewhere else if reused for `next`.
+fn credential_target_changed(previous: &Connection, next: &Connection) -> bool {
+    let (a, b) = (&previous.advanced_settings, &next.advanced_settings);
+    previous.protocol != next.protocol
+        || !previous.host.trim().eq_ignore_ascii_case(next.host.trim())
+        || previous.resolve_port() != next.resolve_port()
+        || previous.username != next.username
+        || a.rdp_domain != b.rdp_domain
+        || a.rdp_gateway != b.rdp_gateway
+        // A different SSH tunnel server decides where the viewer's traffic goes.
+        || a.ssh_tunnel_host.trim() != b.ssh_tunnel_host.trim()
+}
+
 /// Merges imported connections into the existing list according to the specified conflict strategy.
+/// An overwrite that changes where the connection authenticates gets a new ID, so the keyring
+/// password saved under the old ID is not reused; callers should delete that password.
 /// Returns (added_count, updated_count, skipped_count).
 pub fn merge_imported_connections(
     existing: &mut Vec<Connection>,
@@ -109,7 +124,11 @@ pub fn merge_imported_connections(
                     skipped += 1;
                 }
                 ImportConflictStrategy::Overwrite => {
-                    new_conn.id = existing[idx].id.clone();
+                    new_conn.id = if credential_target_changed(&existing[idx], &new_conn) {
+                        uuid::Uuid::new_v4().to_string()
+                    } else {
+                        existing[idx].id.clone()
+                    };
                     existing[idx] = new_conn;
                     updated += 1;
                 }

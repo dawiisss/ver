@@ -42,16 +42,23 @@ pub fn to_json_4spaces<T: Serialize + ?Sized>(data: &T) -> Result<String> {
 }
 
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Mutex;
 
 static CORRUPT_BACKUP_CREATED: AtomicBool = AtomicBool::new(false);
+/// Corrupt files that could not be backed up. Saving over them would destroy the only copy.
+static UNBACKED_CORRUPT_FILES: Mutex<Vec<PathBuf>> = Mutex::new(Vec::new());
 
 /// Returns true if a corrupt configuration file was detected and backed up during this session.
 pub fn was_corrupt_backup_created() -> bool {
     CORRUPT_BACKUP_CREATED.load(Ordering::SeqCst)
 }
 
+/// Returns true if a corrupt configuration file could not be backed up, so saves to it are refused.
+pub fn was_corrupt_backup_failed() -> bool {
+    !UNBACKED_CORRUPT_FILES.lock().unwrap().is_empty()
+}
+
 fn backup_corrupt_file(path: &Path) {
-    CORRUPT_BACKUP_CREATED.store(true, Ordering::SeqCst);
     let timestamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_millis())
@@ -59,8 +66,13 @@ fn backup_corrupt_file(path: &Path) {
     let backup_path = PathBuf::from(format!("{}.corrupt.{}", path.display(), timestamp));
     if let Err(e) = fs::copy(path, &backup_path) {
         eprintln!("Failed to backup corrupt file {:?}: {}", path, e);
+        UNBACKED_CORRUPT_FILES
+            .lock()
+            .unwrap()
+            .push(path.to_path_buf());
     } else {
         eprintln!("Corrupt file backed up to {:?}", backup_path);
+        CORRUPT_BACKUP_CREATED.store(true, Ordering::SeqCst);
     }
 }
 
@@ -117,6 +129,15 @@ pub fn save_connections_to_path(path: &Path, connections: &[Connection]) -> Resu
 }
 
 fn write_json_atomically<T: Serialize + ?Sized>(path: &Path, data: &T) -> Result<()> {
+    anyhow::ensure!(
+        !UNBACKED_CORRUPT_FILES
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|p| p == path),
+        "{:?} is corrupt and could not be backed up, so it will not be overwritten. Move it aside and restart VER.",
+        path
+    );
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
     fs::create_dir_all(parent)
         .with_context(|| format!("Failed to create directory structure for {:?}", parent))?;
@@ -384,5 +405,32 @@ mod tests {
             backup_exists,
             "Corrupt backup file should have been created for non-UTF8 binary"
         );
+    }
+
+    #[test]
+    fn corrupt_file_that_cannot_be_backed_up_is_never_overwritten() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("connections.json");
+        fs::write(&path, b"{ not json").unwrap();
+
+        // A read-only directory makes the backup copy fail.
+        fs::set_permissions(dir.path(), fs::Permissions::from_mode(0o500)).unwrap();
+        let loaded = load_connections_from_path(&path).unwrap();
+        fs::set_permissions(dir.path(), fs::Permissions::from_mode(0o700)).unwrap();
+        assert!(loaded.is_empty());
+        assert!(was_corrupt_backup_failed());
+
+        let err = save_connections_to_path(&path, &[Connection::default()]).unwrap_err();
+        assert!(
+            err.to_string().contains("could not be backed up"),
+            "{:#}",
+            err
+        );
+        assert_eq!(fs::read(&path).unwrap(), b"{ not json");
+
+        // Other files can still be saved.
+        let other = dir.path().join("other.json");
+        save_connections_to_path(&other, &[Connection::default()]).unwrap();
     }
 }

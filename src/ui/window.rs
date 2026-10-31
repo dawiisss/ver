@@ -352,7 +352,13 @@ impl MainWindow {
         let toast_overlay = adw::ToastOverlay::new();
         toast_overlay.set_child(Some(&main_box));
 
-        if storage::was_corrupt_backup_created() {
+        if storage::was_corrupt_backup_failed() {
+            let toast = adw::Toast::new(
+                "A corrupt configuration file could not be backed up; VER will not save over it",
+            );
+            toast.set_timeout(10);
+            toast_overlay.add_toast(toast);
+        } else if storage::was_corrupt_backup_created() {
             let toast = adw::Toast::new(
                 "Warning: Corrupt configuration file detected; backup created (.corrupt)",
             );
@@ -435,7 +441,11 @@ impl MainWindow {
         let trigger_batch_probe = {
             let state_for_probe = state.clone();
             let list_box_for_probe = list_box.clone();
+            // Results from a superseded batch must not overwrite newer ones.
+            let probe_generation = Rc::new(Cell::new(0u64));
             Rc::new(move || {
+                let generation = probe_generation.get().wrapping_add(1);
+                probe_generation.set(generation);
                 let targets: Vec<(String, String, u16)> = {
                     let st = state_for_probe.borrow();
                     st.connections
@@ -462,12 +472,16 @@ impl MainWindow {
 
                 let state_inner = state_for_probe.clone();
                 let list_box_inner = list_box_for_probe.clone();
+                let probe_generation = probe_generation.clone();
 
                 let (tx, rx) = async_channel::unbounded::<(String, HostStatus)>();
                 prober::spawn_batch_probe(targets, Duration::from_millis(2000), 8, tx);
 
                 glib::MainContext::default().spawn_local(async move {
                     while let Ok((id, status)) = rx.recv().await {
+                        if probe_generation.get() != generation {
+                            break;
+                        }
                         state_inner
                             .borrow_mut()
                             .host_statuses
@@ -627,13 +641,34 @@ impl MainWindow {
                         return false;
                     }
 
-                    let Some((added, updated, skipped)) =
+                    let Some(((added, updated, skipped), orphaned_ids)) =
                         commit_connections(&state_inner, &toast_inner, |connections| {
-                            merge_imported_connections(connections, imported_conns, strategy)
+                            let before: Vec<String> =
+                                connections.iter().map(|c| c.id.clone()).collect();
+                            let counts =
+                                merge_imported_connections(connections, imported_conns, strategy);
+                            let orphaned: Vec<String> = before
+                                .into_iter()
+                                .filter(|id| !connections.iter().any(|c| &c.id == id))
+                                .collect();
+                            (counts, orphaned)
                         })
                     else {
                         return false;
                     };
+
+                    // Overwrites that changed endpoint got new IDs; drop the old passwords.
+                    for id in orphaned_ids {
+                        let toast = toast_inner.clone();
+                        glib::MainContext::default().spawn_local(async move {
+                            if let Err(error) = secrets::delete_password(&id).await {
+                                toast.add_toast(adw::Toast::new(&format!(
+                                    "An overwritten connection's old password could not be removed: {:#}",
+                                    error
+                                )));
+                            }
+                        });
+                    }
 
                     // Rebuild sidebar rows
                     while let Some(child) = list_box_inner.first_child() {
