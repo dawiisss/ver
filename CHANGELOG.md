@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased]
+
+### Security
+- Importing with *Overwrite* gives a connection a new ID when its protocol, host, port, user, RDP domain or gateway, or SSH tunnel server changes, and deletes the old saved password, so a stored password is never sent to a different server.
+- If a corrupt configuration file cannot be backed up, VER reports it and refuses to save over it instead of reporting a backup and destroying the only copy.
+
+### Fixed
+- Refreshing reachability while a check is running no longer lets the older results overwrite the newer ones.
+
 ## [1.6.0] - 2026-10-31
 
 ### Added
