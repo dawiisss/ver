@@ -11,6 +11,7 @@ use super::window::AppWindowState;
 use crate::launcher;
 use crate::models::{Connection, Protocol};
 use crate::storage;
+use crate::tray;
 
 #[derive(Clone)]
 pub struct ActiveSession {
@@ -19,12 +20,28 @@ pub struct ActiveSession {
     pub child: Arc<Mutex<Option<std::process::Child>>>,
     pub log_buffer: gtk::TextBuffer,
     pub is_running: Arc<AtomicBool>,
+    /// SSH tunnel the viewer connects through, closed when the session ends.
+    pub tunnel: Arc<Mutex<Option<std::process::Child>>>,
+}
+
+fn close_tunnel(tunnel: &Mutex<Option<std::process::Child>>) {
+    if let Some(child) = tunnel.lock().unwrap().take() {
+        std::thread::spawn(move || launcher::close_tunnel(child));
+    }
 }
 
 pub enum ExternalSessionEvent {
     Log(String),
-    Exit(bool),
+    /// `handed_off`: an SSH terminal launcher exited at once after passing the session to an
+    /// already running terminal server, so the session can no longer be tracked.
+    Exit {
+        success: bool,
+        handed_off: bool,
+    },
 }
+
+/// Terminal launchers that hand off to a server process exit within this time.
+const TERMINAL_HANDOFF_WINDOW: std::time::Duration = std::time::Duration::from_secs(3);
 
 const MAX_LOG_CHUNK_BYTES: u64 = 8192;
 const MAX_LOG_CHARS: i32 = 256 * 1024;
@@ -129,6 +146,7 @@ pub fn show_external_session(
             .build();
 
         let child_arc = session.child.clone();
+        let tunnel = session.tunnel.clone();
         let is_running = session.is_running.clone();
         let stack_for_btn = stack.clone();
         let state_for_btn = state.clone();
@@ -173,6 +191,7 @@ pub fn show_external_session(
                     }
                 });
             }
+            close_tunnel(&tunnel);
             state_for_btn
                 .borrow_mut()
                 .active_sessions
@@ -193,15 +212,19 @@ pub fn show_external_session(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn track_external_session(
     mut child: std::process::Child,
+    mut tunnel: Option<std::process::Child>,
     conn: Connection,
     state: Rc<RefCell<AppWindowState>>,
     list_box: &gtk::ListBox,
     stack: &gtk::Stack,
     container: &gtk::Box,
+    toast_overlay: &adw::ToastOverlay,
 ) {
     let conn_id = conn.id.clone();
+    let is_ssh = conn.protocol == Protocol::Ssh;
     let conn_name = conn.name.clone();
     let log_buffer = gtk::TextBuffer::new(None);
     log_buffer.set_enable_undo(false);
@@ -209,7 +232,9 @@ pub fn track_external_session(
 
     let stdout_pipe = child.stdout.take();
     let stderr_pipe = child.stderr.take();
+    let tunnel_stderr = tunnel.as_mut().and_then(|t| t.stderr.take());
     let child_arc = Arc::new(Mutex::new(Some(child)));
+    let tunnel_arc = Arc::new(Mutex::new(tunnel));
 
     let active_session = ActiveSession {
         conn_id: conn_id.clone(),
@@ -217,6 +242,7 @@ pub fn track_external_session(
         child: child_arc.clone(),
         log_buffer: log_buffer.clone(),
         is_running: is_running.clone(),
+        tunnel: tunnel_arc.clone(),
     };
 
     state
@@ -238,9 +264,15 @@ pub fn track_external_session(
         std::thread::spawn(move || stream_output(stderr, tx_err));
     }
 
+    let tx_tunnel = tx.clone();
+    if let Some(stderr) = tunnel_stderr {
+        std::thread::spawn(move || stream_output(stderr, tx_tunnel));
+    }
+
     let child_arc_for_wait = child_arc.clone();
     let is_running_for_wait = is_running.clone();
     let tx_exit = tx.clone();
+    let started = std::time::Instant::now();
 
     std::thread::spawn(move || loop {
         std::thread::sleep(std::time::Duration::from_millis(500));
@@ -259,8 +291,13 @@ pub fn track_external_session(
         };
         if let Some(success) = exit {
             is_running_for_wait.store(false, Ordering::SeqCst);
+            close_tunnel(&tunnel_arc);
             // Never hold the child mutex while a bounded log queue may be full.
-            let _ = tx_exit.send_blocking(ExternalSessionEvent::Exit(success));
+            let handed_off = is_ssh && success && started.elapsed() < TERMINAL_HANDOFF_WINDOW;
+            let _ = tx_exit.send_blocking(ExternalSessionEvent::Exit {
+                success,
+                handed_off,
+            });
             break;
         }
     });
@@ -271,6 +308,7 @@ pub fn track_external_session(
     let stack_for_exit = stack.clone();
     let conn_id_for_exit = conn_id.clone();
     let child_for_exit = child_arc.clone();
+    let toast_for_exit = toast_overlay.clone();
 
     glib::MainContext::default().spawn_local(async move {
         let mut processed = 0;
@@ -279,7 +317,10 @@ pub fn track_external_session(
                 ExternalSessionEvent::Log(msg) => {
                     append_log(&buffer, &msg);
                 }
-                ExternalSessionEvent::Exit(success) => {
+                ExternalSessionEvent::Exit {
+                    success,
+                    handed_off,
+                } => {
                     let current = state_for_exit
                         .borrow()
                         .active_sessions
@@ -294,6 +335,11 @@ pub fn track_external_session(
                         .active_sessions
                         .remove(&conn_id_for_exit);
                     set_row_active_badge(&list_box_for_exit, &conn_id_for_exit, false);
+                    if handed_off {
+                        toast_for_exit.add_toast(adw::Toast::new(
+                            "SSH opened in an existing terminal window; VER cannot track or disconnect it",
+                        ));
+                    }
 
                     let is_currently_selected = state_for_exit
                         .borrow()
@@ -336,51 +382,114 @@ pub fn launch_session(
     }
 
     let mut config = state.borrow().config.clone();
-    config.last_connected_id = Some(conn.id.clone());
+    config.record_recent(&conn.id);
     match storage::save_config(&config) {
-        Ok(()) => state.borrow_mut().config = config,
+        Ok(()) => {
+            tray::update_launch_menu(&config, &state.borrow().connections);
+            state.borrow_mut().config = config;
+        }
         Err(error) => toast_overlay.add_toast(adw::Toast::new(&format!(
             "Could not save last connection: {:#}",
             error
         ))),
     }
 
-    let launch_result = match conn.protocol {
-        Protocol::Rdp | Protocol::Xrdp => {
-            let pass_opt = if pass.is_empty() {
-                None
-            } else {
-                Some(pass.as_str())
-            };
-            launcher::launch_rdp(&conn, pass_opt)
-        }
-        Protocol::Ssh => launcher::launch_ssh(&conn),
-        Protocol::Spice => {
-            let pass_opt = if pass.is_empty() {
-                None
-            } else {
-                Some(pass.as_str())
-            };
-            launcher::launch_spice(&conn, pass_opt)
-        }
-        Protocol::Vnc => {
-            let pass_opt = if pass.is_empty() {
-                None
-            } else {
-                Some(pass.as_str())
-            };
-            launcher::launch_vnc(&conn, pass_opt)
-        }
-    };
+    if conn.uses_ssh_tunnel() {
+        launch_through_tunnel(conn, pass, state, toast_overlay, list_box, stack, container);
+        return;
+    }
 
-    match launch_result {
+    match launch_viewer(&conn, &pass) {
         Ok(child) => {
-            track_external_session(child, conn, state, list_box, stack, container);
+            track_external_session(
+                child,
+                None,
+                conn,
+                state,
+                list_box,
+                stack,
+                container,
+                toast_overlay,
+            );
         }
         Err(err) => {
             toast_overlay.add_toast(adw::Toast::new(&format!("Connection failed: {}", err)));
         }
     }
+}
+
+fn launch_viewer(conn: &Connection, pass: &str) -> Result<std::process::Child, String> {
+    let pass_opt = Some(pass).filter(|p| !p.is_empty());
+    match conn.protocol {
+        Protocol::Rdp | Protocol::Xrdp => launcher::launch_rdp(conn, pass_opt),
+        Protocol::Ssh => launcher::launch_ssh(conn),
+        Protocol::Spice => launcher::launch_spice(conn, pass_opt),
+        Protocol::Vnc => launcher::launch_vnc(conn, pass_opt),
+    }
+}
+
+/// Open the SSH tunnel on a worker thread, then start the viewer against its local port.
+fn launch_through_tunnel(
+    conn: Connection,
+    pass: String,
+    state: Rc<RefCell<AppWindowState>>,
+    toast_overlay: &adw::ToastOverlay,
+    list_box: &gtk::ListBox,
+    stack: &gtk::Stack,
+    container: &gtk::Box,
+) {
+    if !state.borrow_mut().pending_tunnels.insert(conn.id.clone()) {
+        toast_overlay.add_toast(adw::Toast::new(&format!(
+            "The SSH tunnel for '{}' is still opening",
+            conn.name
+        )));
+        return;
+    }
+    toast_overlay.add_toast(adw::Toast::new(&format!(
+        "Opening SSH tunnel through {}…",
+        conn.advanced_settings.ssh_tunnel_host.trim()
+    )));
+
+    let (tx, rx) = async_channel::bounded(1);
+    let tunnel_conn = conn.clone();
+    std::thread::spawn(move || {
+        let _ = tx.send_blocking(launcher::open_ssh_tunnel(&tunnel_conn));
+    });
+
+    let toast_overlay = toast_overlay.clone();
+    let list_box = list_box.clone();
+    let stack = stack.clone();
+    let container = container.clone();
+    glib::MainContext::default().spawn_local(async move {
+        let result = rx
+            .recv()
+            .await
+            .unwrap_or_else(|_| Err("The SSH tunnel worker stopped unexpectedly".into()));
+        state.borrow_mut().pending_tunnels.remove(&conn.id);
+        let tunnel = match result {
+            Ok(tunnel) => tunnel,
+            Err(err) => {
+                toast_overlay.add_toast(adw::Toast::new(&format!("Connection failed: {}", err)));
+                return;
+            }
+        };
+        match launch_viewer(&launcher::through_tunnel(&conn, tunnel.local_port), &pass) {
+            Ok(child) => track_external_session(
+                child,
+                Some(tunnel.child),
+                conn,
+                state,
+                &list_box,
+                &stack,
+                &container,
+                &toast_overlay,
+            ),
+            Err(err) => {
+                std::thread::spawn(move || launcher::close_tunnel(tunnel.child));
+                toast_overlay.add_toast(adw::Toast::new(&format!("Connection failed: {}", err)));
+            }
+        }
+    });
 }
 
 #[cfg(test)]

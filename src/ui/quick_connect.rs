@@ -74,6 +74,7 @@ pub fn parse_quick_connect(input: &str, default_proto: Protocol) -> Result<Conne
         username,
         mac_address: String::new(),
         group: "Quick Connect".to_string(),
+        pinned: false,
         advanced_settings: AdvancedSettings::default(),
     };
     connection.validate()?;
@@ -336,6 +337,7 @@ impl QuickConnectDialog {
                     username,
                     mac_address: String::new(),
                     group: "Quick Connect".to_string(),
+                    pinned: false,
                     advanced_settings: AdvancedSettings::default(),
                 };
 

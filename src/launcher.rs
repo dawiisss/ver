@@ -1,10 +1,12 @@
 use crate::models::{
     format_host_port, Connection, RdpCertHandling, RdpColorDepth, RdpNetworkProfile,
-    RdpSecurityProtocol,
+    RdpSecurityProtocol, SshDestination,
 };
 use std::env;
+use std::net::{Ipv4Addr, SocketAddr, TcpListener, TcpStream};
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
+use std::time::{Duration, Instant};
 
 /// Linux terminal emulator search order for interactive SSH sessions.
 pub const TERMINAL_CANDIDATES: &[&str] = &[
@@ -51,6 +53,21 @@ pub fn detect_terminal_emulator() -> Option<(&'static str, PathBuf)> {
         }
     }
     None
+}
+
+/// Reject hosts a viewer could parse as an option; imported files are not validated otherwise.
+fn check_launch_host(conn: &Connection) -> Result<(), String> {
+    let host = conn.host.trim();
+    if host.is_empty() {
+        return Err("Connection host cannot be empty".to_string());
+    }
+    if host.starts_with('-') {
+        return Err(format!(
+            "Refusing to launch: host '{}' starts with '-'",
+            host
+        ));
+    }
+    Ok(())
 }
 
 /// Build command-line argument list for `xfreerdp3` based on connection parameters.
@@ -249,20 +266,18 @@ pub fn build_ssh_args_with_identity(conn: &Connection, identity_file: Option<&st
     }
 
     if let Some(key_path) = identity_file {
-        let trimmed_key = key_path.trim();
-        if !trimmed_key.is_empty() {
-            ssh_args.push("-i".to_string());
-            let expanded = if let Some(stripped) = trimmed_key.strip_prefix("~/") {
-                if let Some(home) = dirs::home_dir() {
-                    home.join(stripped).to_string_lossy().to_string()
-                } else {
-                    trimmed_key.to_string()
-                }
-            } else {
-                trimmed_key.to_string()
-            };
-            ssh_args.push(expanded);
-        }
+        push_identity(&mut ssh_args, key_path);
+    }
+
+    let jump_host = conn.advanced_settings.ssh_jump_host.trim();
+    if !jump_host.is_empty() {
+        ssh_args.push("-J".to_string());
+        ssh_args.push(jump_host.to_string());
+    }
+
+    for forward in &conn.advanced_settings.ssh_forwards {
+        ssh_args.push(forward.kind.flag().to_string());
+        ssh_args.push(forward.spec());
     }
 
     let target = if !conn.username.trim().is_empty() {
@@ -274,6 +289,161 @@ pub fn build_ssh_args_with_identity(conn: &Connection, identity_file: Option<&st
     ssh_args.push(target);
 
     ssh_args
+}
+
+/// Append `-i <key>`, expanding a leading `~/`.
+fn push_identity(args: &mut Vec<String>, key_path: &str) {
+    let trimmed_key = key_path.trim();
+    if trimmed_key.is_empty() {
+        return;
+    }
+    args.push("-i".to_string());
+    let expanded = match (trimmed_key.strip_prefix("~/"), dirs::home_dir()) {
+        (Some(stripped), Some(home)) => home.join(stripped).to_string_lossy().to_string(),
+        _ => trimmed_key.to_string(),
+    };
+    args.push(expanded);
+}
+
+/// How long to wait for an SSH tunnel to authenticate and start listening.
+pub const SSH_TUNNEL_TIMEOUT: Duration = Duration::from_secs(20);
+
+/// A background `ssh -N -L` process forwarding a local port to the connection's host.
+pub struct SshTunnel {
+    pub child: Child,
+    pub local_port: u16,
+}
+
+/// Arguments for `ssh` forwarding `127.0.0.1:local_port` to the connection's host and port
+/// through its tunnel host. Without a terminal ssh cannot prompt, so authentication must use
+/// a key or agent, and unknown host keys are accepted on first use (changed keys still fail).
+pub fn build_tunnel_args(conn: &Connection, local_port: u16) -> Result<Vec<String>, String> {
+    let gateway = SshDestination::parse(&conn.advanced_settings.ssh_tunnel_host)
+        .map_err(|e| format!("SSH tunnel: {}", e))?;
+    let dest_host = conn.host.trim().trim_matches(['[', ']']);
+    let dest_host = if dest_host.contains(':') {
+        format!("[{}]", dest_host)
+    } else {
+        dest_host.to_string()
+    };
+    let mut args: Vec<String> = [
+        "-N",
+        "-o",
+        "ExitOnForwardFailure=yes",
+        "-o",
+        "BatchMode=yes",
+        "-o",
+        "StrictHostKeyChecking=accept-new",
+        "-o",
+        "ServerAliveInterval=30",
+        "-L",
+    ]
+    .iter()
+    .map(|s| s.to_string())
+    .collect();
+    args.push(format!(
+        "127.0.0.1:{}:{}:{}",
+        local_port,
+        dest_host,
+        conn.resolve_port()
+    ));
+    if let Some(port) = gateway.port {
+        args.push("-p".to_string());
+        args.push(port.to_string());
+    }
+    push_identity(&mut args, &conn.advanced_settings.ssh_tunnel_identity_file);
+    args.push("--".to_string());
+    args.push(gateway.target());
+    Ok(args)
+}
+
+/// A copy of `conn` that a viewer can use to connect through a tunnel's local port.
+pub fn through_tunnel(conn: &Connection, local_port: u16) -> Connection {
+    let mut tunneled = conn.clone();
+    tunneled.host = Ipv4Addr::LOCALHOST.to_string();
+    tunneled.port = local_port;
+    tunneled.advanced_settings.ssh_tunnel_host.clear();
+    tunneled
+}
+
+fn free_local_port() -> Result<u16, String> {
+    TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .and_then(|listener| listener.local_addr())
+        .map(|addr| addr.port())
+        .map_err(|e| format!("Could not find a free local port for the SSH tunnel: {}", e))
+}
+
+/// Start an SSH tunnel and block until its local port accepts connections.
+pub fn open_ssh_tunnel(conn: &Connection) -> Result<SshTunnel, String> {
+    open_ssh_tunnel_with(conn, "ssh", free_local_port()?, SSH_TUNNEL_TIMEOUT)
+}
+
+fn open_ssh_tunnel_with(
+    conn: &Connection,
+    binary: &str,
+    local_port: u16,
+    timeout: Duration,
+) -> Result<SshTunnel, String> {
+    check_launch_host(conn)?;
+    let args = build_tunnel_args(conn, local_port)?;
+    let gateway = conn.advanced_settings.ssh_tunnel_host.trim();
+
+    let mut cmd = Command::new(binary);
+    cmd.args(&args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped());
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        cmd.process_group(0);
+    }
+    let mut child = cmd
+        .spawn()
+        .map_err(|e| format!("Failed to start ssh for the tunnel: {}", e))?;
+
+    let local = SocketAddr::from((Ipv4Addr::LOCALHOST, local_port));
+    let deadline = Instant::now() + timeout;
+    loop {
+        if let Ok(Some(status)) = child.try_wait() {
+            use std::io::Read;
+            let mut message = String::new();
+            if let Some(stderr) = child.stderr.take() {
+                let _ = stderr.take(4096).read_to_string(&mut message);
+            }
+            // Drop ssh's notice about trusting a new host key; the failure follows it.
+            let message = message
+                .lines()
+                .map(str::trim)
+                .filter(|line| !line.is_empty() && !line.starts_with("Warning: Permanently added"))
+                .collect::<Vec<_>>()
+                .join("; ");
+            return Err(if message.is_empty() {
+                format!("SSH tunnel through {} exited ({})", gateway, status)
+            } else {
+                format!("SSH tunnel through {} failed: {}", gateway, message)
+            });
+        }
+        // ssh listens on the local port only once authentication has succeeded.
+        if TcpStream::connect_timeout(&local, Duration::from_millis(200)).is_ok() {
+            return Ok(SshTunnel { child, local_port });
+        }
+        if Instant::now() >= deadline {
+            close_tunnel(child);
+            return Err(format!(
+                "SSH tunnel through {} did not open within {} seconds",
+                gateway,
+                timeout.as_secs()
+            ));
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+}
+
+/// Stop a tunnel's ssh process and reap it.
+pub fn close_tunnel(mut child: Child) {
+    let _ = child.kill();
+    let _ = child.wait();
 }
 
 /// Standard `build_ssh_args` wrapper for backward compatibility with existing tests.
@@ -304,8 +474,12 @@ pub fn build_terminal_command(
     let mut cmd = Command::new(term_name);
 
     match term_name {
-        "ptyxis" | "gnome-terminal" => {
+        "ptyxis" => {
             cmd.arg("--").args(&ssh_args);
+        }
+        "gnome-terminal" => {
+            // Without --wait the client exits as soon as gnome-terminal-server opens the tab.
+            cmd.arg("--wait").arg("--").args(&ssh_args);
         }
         "kgx" => {
             let ssh_str = ssh_args
@@ -339,9 +513,7 @@ pub fn build_terminal_command(
 
 /// Spawns an `xfreerdp3` RDP session detached from parent process group.
 pub fn launch_rdp(conn: &Connection, password: Option<&str>) -> Result<Child, String> {
-    if conn.host.trim().is_empty() {
-        return Err("Connection host cannot be empty".to_string());
-    }
+    check_launch_host(conn)?;
 
     let mut args = build_rdp_args(conn, None);
     let has_password = password.map(|p| !p.is_empty()).unwrap_or(false);
@@ -389,9 +561,7 @@ pub fn launch_ssh_with_identity(
     conn: &Connection,
     identity_file: Option<&str>,
 ) -> Result<Child, String> {
-    if conn.host.trim().is_empty() {
-        return Err("Connection host cannot be empty".to_string());
-    }
+    check_launch_host(conn)?;
 
     let (term_name, _path) = detect_terminal_emulator().ok_or_else(|| {
         format!(
@@ -498,6 +668,11 @@ pub fn build_vnc_args(conn: &Connection) -> Vec<String> {
     args
 }
 
+/// Per-user runtime directory (tmpfs, cleared at logout) for VNC password files, else the temp dir.
+fn vnc_password_dir() -> PathBuf {
+    dirs::runtime_dir().unwrap_or_else(env::temp_dir)
+}
+
 pub fn launch_vnc(conn: &Connection, password: Option<&str>) -> Result<Child, String> {
     launch_vnc_with_binary(conn, password, "vncviewer")
 }
@@ -507,9 +682,7 @@ pub fn launch_vnc_with_binary(
     password: Option<&str>,
     vncviewer_bin: &str,
 ) -> Result<Child, String> {
-    if conn.host.trim().is_empty() {
-        return Err("Connection host cannot be empty".to_string());
-    }
+    check_launch_host(conn)?;
 
     let mut args = build_vnc_args(conn);
 
@@ -543,28 +716,30 @@ pub fn launch_vnc_with_binary(
         let output = vncpasswd
             .wait_with_output()
             .map_err(|e| format!("vncpasswd failed: {}", e))?;
-        if output.status.success() {
-            use std::io::Write;
-            let mut builder = tempfile::Builder::new();
-            builder.prefix("ver_vnc_").suffix(".pwd");
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::PermissionsExt;
-                builder.permissions(std::fs::Permissions::from_mode(0o600));
-            }
-            if let Ok(mut temp_file) = builder.tempfile() {
-                if temp_file.write_all(&output.stdout).is_ok() {
-                    if let Ok((_, path)) = temp_file.keep() {
-                        let path_str = path.to_string_lossy().to_string();
-                        args.push("-passwd".to_string());
-                        args.push(path_str.clone());
-                        temp_file_path = Some(path_str);
-                    }
-                }
-            }
-        } else {
+        if !output.status.success() {
             return Err("vncpasswd failed to generate obfuscated password".to_string());
         }
+        use std::io::Write;
+        let mut builder = tempfile::Builder::new();
+        builder.prefix("ver_vnc_").suffix(".pwd");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            builder.permissions(std::fs::Permissions::from_mode(0o600));
+        }
+        let mut temp_file = builder
+            .tempfile_in(vnc_password_dir())
+            .map_err(|e| format!("Failed to create VNC password file: {}", e))?;
+        temp_file
+            .write_all(&output.stdout)
+            .map_err(|e| format!("Failed to write VNC password file: {}", e))?;
+        let (_, path) = temp_file
+            .keep()
+            .map_err(|e| format!("Failed to keep VNC password file: {}", e))?;
+        let path_str = path.to_string_lossy().to_string();
+        args.push("-passwd".to_string());
+        args.push(path_str.clone());
+        temp_file_path = Some(path_str);
     }
 
     let mut cmd = Command::new(vncviewer_bin);
@@ -590,17 +765,23 @@ pub fn launch_vnc_with_binary(
         }
     };
 
-    // Clean up temporary password file once vncviewer has started and read it, or immediately if vncviewer exits
+    // vncviewer reads the file whenever the server asks for authentication, including on
+    // reconnects, so keep it until the viewer has exited.
     if let Some(path) = temp_file_path {
         let child_pid = child.id();
         std::thread::spawn(move || {
-            for _ in 0..20 {
+            loop {
                 std::thread::sleep(std::time::Duration::from_millis(500));
                 #[cfg(unix)]
-                unsafe {
-                    if child_pid > 0 && libc::kill(child_pid as i32, 0) != 0 {
+                {
+                    // SAFETY: signal 0 performs only an existence check on the process.
+                    if child_pid == 0 || unsafe { libc::kill(child_pid as i32, 0) } != 0 {
                         break;
                     }
+                }
+                #[cfg(not(unix))]
+                {
+                    break;
                 }
             }
             let _ = std::fs::remove_file(&path);
@@ -658,9 +839,7 @@ fn launch_spice_with_binary(
     password: Option<&str>,
     binary: &str,
 ) -> Result<Child, String> {
-    if conn.host.trim().is_empty() {
-        return Err("Connection host cannot be empty".to_string());
-    }
+    check_launch_host(conn)?;
 
     let password = password.filter(|p| !p.is_empty());
     let mut child = spice_command(conn, password.is_some(), binary)
@@ -936,7 +1115,7 @@ mod tests {
         conn.host = "127.0.0.1".to_string();
         conn.port = 5900;
 
-        let temp_before = std::fs::read_dir("/tmp")
+        let temp_before = std::fs::read_dir(vnc_password_dir())
             .map(|entries| {
                 entries
                     .filter_map(|e| e.ok())
@@ -952,7 +1131,7 @@ mod tests {
         );
         assert!(res.is_err());
 
-        let temp_after = std::fs::read_dir("/tmp")
+        let temp_after = std::fs::read_dir(vnc_password_dir())
             .map(|entries| {
                 entries
                     .filter_map(|e| e.ok())
@@ -1008,5 +1187,107 @@ mod tests {
         assert!(args.contains(&"-Shared".to_string()));
         assert!(args.contains(&"-PreferredEncoding=Tight".to_string()));
         assert!(args.contains(&"192.168.1.100:5900".to_string()));
+    }
+
+    fn tunneled_rdp() -> Connection {
+        let mut conn = Connection {
+            protocol: Protocol::Rdp,
+            host: "fe80::5".into(),
+            port: 3390,
+            ..Default::default()
+        };
+        conn.advanced_settings.ssh_tunnel_host = "me@gateway:2222".into();
+        conn.advanced_settings.ssh_tunnel_identity_file = "/keys/gw".into();
+        conn
+    }
+
+    fn shim(dir: &std::path::Path, script: &str) -> String {
+        use std::os::unix::fs::PermissionsExt;
+        let path = dir.join("ssh");
+        std::fs::write(&path, format!("#!/bin/sh\n{}\n", script)).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o700)).unwrap();
+        path.to_string_lossy().into_owned()
+    }
+
+    #[test]
+    fn test_build_ssh_args_with_jump_hosts_and_forwards() {
+        let mut conn = Connection::new_with_protocol(Protocol::Ssh);
+        conn.host = "internal".into();
+        conn.advanced_settings.ssh_jump_host = "me@bastion:2222,second".into();
+        conn.advanced_settings.ssh_forwards = vec![
+            crate::models::SshForward::parse("L 8080:localhost:80").unwrap(),
+            crate::models::SshForward::parse("D 1080").unwrap(),
+        ];
+        let args = build_ssh_args(&conn);
+        assert_eq!(
+            args,
+            [
+                "ssh",
+                "-J",
+                "me@bastion:2222,second",
+                "-L",
+                "8080:localhost:80",
+                "-D",
+                "1080",
+                "--",
+                "internal"
+            ]
+        );
+    }
+
+    #[test]
+    fn test_build_tunnel_args() {
+        let args = build_tunnel_args(&tunneled_rdp(), 40000).unwrap();
+        let joined = args.join(" ");
+        assert!(joined.starts_with("-N -o ExitOnForwardFailure=yes -o BatchMode=yes"));
+        assert!(joined.contains("-L 127.0.0.1:40000:[fe80::5]:3390"));
+        assert!(joined.ends_with("-p 2222 -i /keys/gw -- me@gateway"));
+    }
+
+    #[test]
+    fn test_viewer_connects_to_the_tunnel_port() {
+        let viewer = through_tunnel(&tunneled_rdp(), 40000);
+        assert_eq!((viewer.host.as_str(), viewer.port), ("127.0.0.1", 40000));
+        assert!(!viewer.uses_ssh_tunnel());
+        assert!(build_rdp_args(&viewer, None).contains(&"/v:127.0.0.1:40000".to_string()));
+    }
+
+    #[test]
+    fn test_tunnel_reports_ssh_errors() {
+        let dir = tempfile::tempdir().unwrap();
+        let ssh = shim(
+            dir.path(),
+            "echo 'Permission denied (publickey).' >&2; exit 255",
+        );
+        let err = open_ssh_tunnel_with(&tunneled_rdp(), &ssh, 1, Duration::from_secs(5))
+            .err()
+            .unwrap();
+        assert!(err.contains("Permission denied (publickey)"), "{}", err);
+    }
+
+    #[test]
+    fn test_tunnel_is_ready_once_its_port_listens() {
+        let dir = tempfile::tempdir().unwrap();
+        let ssh = shim(dir.path(), "exec sleep 30");
+        // Stands in for the port ssh would listen on after authenticating.
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let tunnel =
+            open_ssh_tunnel_with(&tunneled_rdp(), &ssh, port, Duration::from_secs(5)).unwrap();
+        assert_eq!(tunnel.local_port, port);
+        close_tunnel(tunnel.child);
+    }
+
+    #[test]
+    fn test_tunnel_times_out_and_stops_ssh() {
+        let dir = tempfile::tempdir().unwrap();
+        let ssh = shim(dir.path(), "exec sleep 30");
+        let port = free_local_port().unwrap();
+        let started = Instant::now();
+        let err = open_ssh_tunnel_with(&tunneled_rdp(), &ssh, port, Duration::from_millis(500))
+            .err()
+            .unwrap();
+        assert!(err.contains("did not open"), "{}", err);
+        assert!(started.elapsed() < Duration::from_secs(5));
     }
 }

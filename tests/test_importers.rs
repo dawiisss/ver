@@ -3,7 +3,7 @@ use ver::importers::{
     import_remmina_content, import_ssh_config_content, merge_imported_connections,
     ImportConflictStrategy,
 };
-use ver::models::{Connection, Protocol, RdpCertHandling};
+use ver::models::{Connection, Protocol, RdpCertHandling, SshForwardKind};
 
 #[test]
 fn test_remmina_rdp_parsing() {
@@ -18,7 +18,7 @@ domain=CORP
 colordepth=32
 cert_ignore=1
 multimon=1
-viewmode=1
+viewmode=2
 sound=local
 glyph-cache=1
 "#;
@@ -56,6 +56,9 @@ disableclipboard=1
     assert_eq!(conn.host, "10.0.0.5");
     assert_eq!(conn.port, 5901);
     assert!(!conn.advanced_settings.clipboard_sharing);
+
+    let windowed = import_remmina_content(&format!("{}viewmode=1\n", vnc_content), None).unwrap();
+    assert!(!windowed.advanced_settings.vnc_fullscreen);
 
     let ssh_content = r#"
 [remmina]
@@ -113,6 +116,39 @@ Host db-master
     let db = conns.iter().find(|c| c.name == "db-master").unwrap();
     assert_eq!(db.host, "db.internal.net");
     assert_eq!(db.username, "defaultuser");
+}
+
+#[test]
+fn test_ssh_config_conditional_blocks_do_not_leak() {
+    let ssh_config = r#"
+Host *.internal !legacy.internal
+  HostName jump.example.com
+  User ops
+
+Host prod
+  HostName 10.0.0.5
+
+Match exec "test -f /tmp/ci"
+  User ci
+
+Host web
+  Port = 2200
+
+Match all
+  User fallback
+"#;
+
+    let conns = import_ssh_config_content(ssh_config).unwrap();
+    assert_eq!(conns.len(), 2);
+
+    let prod = conns.iter().find(|c| c.name == "prod").unwrap();
+    assert_eq!(prod.host, "10.0.0.5");
+    assert_eq!(prod.username, "fallback");
+
+    let web = conns.iter().find(|c| c.name == "web").unwrap();
+    assert_eq!(web.host, "web");
+    assert_eq!(web.port, 2200);
+    assert_eq!(web.username, "fallback");
 }
 
 #[test]
@@ -203,4 +239,83 @@ fn test_conflict_merge_strategies() {
     assert_eq!((added, updated, skipped), (1, 0, 0));
     assert_eq!(list.len(), 2);
     assert_eq!(list[1].name, "Server A (Imported)");
+}
+
+#[test]
+fn test_ssh_config_jump_hosts_and_forwards() {
+    let content = r#"
+Host *
+    DynamicForward 1080
+
+Host internal
+    HostName 10.0.0.9
+    ProxyJump admin@bastion:2222
+    LocalForward 8080 localhost:80
+    LocalForward 127.0.0.1:5433 db:5432
+    RemoteForward 9000 localhost:3000
+    LocalForward /tmp/socket /var/run/socket
+
+Host bastion
+    ProxyJump none
+"#;
+    let conns = import_ssh_config_content(content).unwrap();
+    let internal = conns.iter().find(|c| c.name == "internal").unwrap();
+    let adv = &internal.advanced_settings;
+    assert_eq!(adv.ssh_jump_host, "admin@bastion:2222");
+    let specs: Vec<(SshForwardKind, String)> = adv
+        .ssh_forwards
+        .iter()
+        .map(|f| (f.kind, f.spec()))
+        .collect();
+    assert_eq!(
+        specs,
+        [
+            (SshForwardKind::Local, "8080:localhost:80".to_string()),
+            (SshForwardKind::Local, "127.0.0.1:5433:db:5432".to_string()),
+            (SshForwardKind::Remote, "9000:localhost:3000".to_string()),
+            (SshForwardKind::Dynamic, "1080".to_string()),
+        ]
+    );
+    let bastion = conns.iter().find(|c| c.name == "bastion").unwrap();
+    assert!(bastion.advanced_settings.ssh_jump_host.is_empty());
+}
+
+#[test]
+fn test_remmina_ssh_tunnel_import() {
+    let content = r#"
+[remmina]
+name=Behind Gateway
+protocol=VNC
+server=10.0.0.20:5901
+ssh_tunnel_enabled=1
+ssh_tunnel_server=gateway.example:2222
+ssh_tunnel_username=ops
+ssh_tunnel_privatekey=/home/ops/.ssh/id_ed25519
+"#;
+    let conn = import_remmina_content(content, None).unwrap();
+    assert_eq!(conn.host, "10.0.0.20");
+    assert_eq!(
+        conn.advanced_settings.ssh_tunnel_host,
+        "ops@gateway.example:2222"
+    );
+    assert_eq!(
+        conn.advanced_settings.ssh_tunnel_identity_file,
+        "/home/ops/.ssh/id_ed25519"
+    );
+    assert!(conn.uses_ssh_tunnel());
+
+    let loopback = import_remmina_content(
+        "[remmina]\nprotocol=RDP\nserver=winbox\nssh_tunnel_enabled=1\nssh_tunnel_loopback=1\n",
+        None,
+    )
+    .unwrap();
+    assert_eq!(loopback.host, "127.0.0.1");
+    assert_eq!(loopback.advanced_settings.ssh_tunnel_host, "winbox");
+
+    let disabled = import_remmina_content(
+        "[remmina]\nprotocol=RDP\nserver=winbox\nssh_tunnel_server=gw\n",
+        None,
+    )
+    .unwrap();
+    assert!(!disabled.uses_ssh_tunnel());
 }

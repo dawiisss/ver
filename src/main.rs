@@ -65,14 +65,16 @@ fn main() {
         .build();
 
     let (tx, rx) = async_channel::unbounded();
-    let tray = VerTray { tx };
-    let _tray_handle = match tray.spawn() {
-        Ok(handle) => Some(handle),
+    let tray = VerTray {
+        tx,
+        entries: Default::default(),
+    };
+    match tray.spawn() {
+        Ok(handle) => ver::tray::attach_handle(handle),
         Err(e) => {
             eprintln!("Warning: StatusNotifierItem system tray unavailable: {}", e);
-            None
         }
-    };
+    }
 
     let app_clone = app.clone();
     glib::MainContext::default().spawn_local(async move {
@@ -87,6 +89,27 @@ fn main() {
                         window.present();
                     } else {
                         app_clone.activate();
+                    }
+                }
+                TrayMessage::Connect(id) => {
+                    // The active window may be a dialog, so look up the main window itself.
+                    let main_window = || {
+                        app_clone
+                            .windows()
+                            .into_iter()
+                            .find_map(|w| w.downcast::<libadwaita::ApplicationWindow>().ok())
+                    };
+                    if main_window().is_none() {
+                        app_clone.activate();
+                    }
+                    if let Some(window) = main_window() {
+                        window.set_visible(true);
+                        window.present();
+                        gtk::gio::prelude::ActionGroupExt::activate_action(
+                            &window,
+                            "launch-connection",
+                            Some(&id.to_variant()),
+                        );
                     }
                 }
                 TrayMessage::Quit => {

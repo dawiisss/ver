@@ -1,11 +1,52 @@
 use gtk::prelude::*;
 use libadwaita as adw;
 use libadwaita::prelude::*;
+use std::cell::RefCell;
+use std::rc::Rc;
 
 use crate::models::{
     AdvancedSettings, Connection, Protocol, RdpCertHandling, RdpColorDepth, RdpNetworkProfile,
-    RdpSecurityProtocol,
+    RdpSecurityProtocol, SshForward,
 };
+
+/// Add a row for `forward` above the "Add Forward" entry, with a button that removes it.
+fn add_forward_row(
+    group: &adw::PreferencesGroup,
+    add_entry: &adw::EntryRow,
+    forwards: &Rc<RefCell<Vec<SshForward>>>,
+    forward: SshForward,
+) {
+    let row = adw::ActionRow::builder()
+        .title(forward.describe())
+        .subtitle(format!("{} {}", forward.kind.flag(), forward.spec()))
+        .use_markup(false)
+        .build();
+    let remove_btn = gtk::Button::builder()
+        .icon_name("user-trash-symbolic")
+        .tooltip_text("Remove Forward")
+        .valign(gtk::Align::Center)
+        .css_classes(vec!["flat"])
+        .build();
+    row.add_suffix(&remove_btn);
+
+    group.remove(add_entry);
+    group.add(&row);
+    group.add(add_entry);
+
+    // Weak references, because the row owns this button and its handler.
+    let group_weak = group.downgrade();
+    let row_weak = row.downgrade();
+    let forwards = forwards.clone();
+    remove_btn.connect_clicked(move |_| {
+        let mut list = forwards.borrow_mut();
+        if let Some(index) = list.iter().position(|f| *f == forward) {
+            list.remove(index);
+        }
+        if let (Some(group), Some(row)) = (group_weak.upgrade(), row_weak.upgrade()) {
+            group.remove(&row);
+        }
+    });
+}
 
 pub struct ConnectionEditor {
     pub connection: Connection,
@@ -451,8 +492,67 @@ impl ConnectionEditor {
             .text(&conn.advanced_settings.ssh_identity_file)
             .build();
 
+        // Jump hosts authenticate with ~/.ssh/config or ssh-agent; -i applies to the target only.
+        let entry_ssh_jump_host = adw::EntryRow::builder()
+            .title("Jump Hosts (e.g. user@bastion:22, comma separated)")
+            .text(&conn.advanced_settings.ssh_jump_host)
+            .build();
+
         group_ssh.add(&entry_ssh_identity_file);
+        group_ssh.add(&entry_ssh_jump_host);
         page.add(&group_ssh);
+
+        // 4.7 SSH Port Forwards
+        let group_forwards = adw::PreferencesGroup::builder()
+            .title("Port Forwards")
+            .description("Opened while the SSH session runs")
+            .build();
+        let entry_add_forward = adw::EntryRow::builder()
+            .title("Add Forward (L 8080:localhost:80, R 9000:localhost:3000, D 1080)")
+            .show_apply_button(true)
+            .build();
+        group_forwards.add(&entry_add_forward);
+        let forwards = Rc::new(RefCell::new(Vec::new()));
+        for forward in &conn.advanced_settings.ssh_forwards {
+            forwards.borrow_mut().push(forward.clone());
+            add_forward_row(
+                &group_forwards,
+                &entry_add_forward,
+                &forwards,
+                forward.clone(),
+            );
+        }
+        {
+            let group = group_forwards.clone();
+            let forwards = forwards.clone();
+            let toast_overlay = toast_overlay.clone();
+            entry_add_forward.connect_apply(move |entry| match SshForward::parse(&entry.text()) {
+                Ok(forward) => {
+                    forwards.borrow_mut().push(forward.clone());
+                    add_forward_row(&group, entry, &forwards, forward);
+                    entry.set_text("");
+                }
+                Err(err) => toast_overlay.add_toast(adw::Toast::new(&err)),
+            });
+        }
+        page.add(&group_forwards);
+
+        // 4.8 SSH Tunnel for graphical protocols
+        let group_tunnel = adw::PreferencesGroup::builder()
+            .title("SSH Tunnel")
+            .description("Connect through an SSH server, which resolves the host above. It must accept a key or ssh-agent, and new host keys are trusted on first use.")
+            .build();
+        let entry_ssh_tunnel_host = adw::EntryRow::builder()
+            .title("SSH Server (e.g. user@gateway:22; empty connects directly)")
+            .text(&conn.advanced_settings.ssh_tunnel_host)
+            .build();
+        let entry_ssh_tunnel_identity = adw::EntryRow::builder()
+            .title("Identity Key File (optional)")
+            .text(&conn.advanced_settings.ssh_tunnel_identity_file)
+            .build();
+        group_tunnel.add(&entry_ssh_tunnel_host);
+        group_tunnel.add(&entry_ssh_tunnel_identity);
+        page.add(&group_tunnel);
 
         // Toggle Visibility based on Protocol
         let last_proto_idx = std::rc::Rc::new(std::cell::RefCell::new(selected_proto_idx));
@@ -462,6 +562,8 @@ impl ConnectionEditor {
             let group_vnc = group_vnc.clone();
             let group_spice = group_spice.clone();
             let group_ssh = group_ssh.clone();
+            let group_forwards = group_forwards.clone();
+            let group_tunnel = group_tunnel.clone();
             let entry_port = entry_port.clone();
             let last_proto_idx = last_proto_idx.clone();
             move |idx: u32, set_default_port: bool| {
@@ -477,6 +579,8 @@ impl ConnectionEditor {
                     _ => "22",
                 };
 
+                group_forwards.set_visible(idx == 2);
+                group_tunnel.set_visible(idx != 2);
                 match idx {
                     0 | 4 => {
                         // RDP / XRDP
@@ -624,11 +728,17 @@ impl ConnectionEditor {
 
         // Helper to extract Connection and Password from form
         let conn_id = conn.id.clone();
+        let conn_pinned = conn.pinned;
         let mac_for_extract = entry_mac.clone();
         let entry_name_extract = entry_name.clone();
         let entry_host_extract = entry_host.clone();
         let entry_port_extract = entry_port.clone();
         let extract_form = move || -> Result<(Connection, String), String> {
+            if !entry_add_forward.text().trim().is_empty() {
+                return Err(
+                    "Press Enter to add the port forward, or clear it, before continuing".into(),
+                );
+            }
             let name = entry_name_extract.text().to_string();
             if name.trim().is_empty() {
                 return Err("Connection name cannot be empty".to_string());
@@ -720,6 +830,7 @@ impl ConnectionEditor {
                 username: entry_username.text().trim().to_string(),
                 mac_address: mac_for_extract.text().trim().to_string(),
                 group,
+                pinned: conn_pinned,
                 advanced_settings: AdvancedSettings {
                     rdp_fullscreen: switch_rdp_fullscreen.is_active(),
                     rdp_multimon: switch_rdp_multimon.is_active(),
@@ -756,6 +867,10 @@ impl ConnectionEditor {
                     spice_usb_redirect: switch_spice_usb_redirect.is_active(),
                     spice_scale_to_window: switch_spice_scale_to_window.is_active(),
                     ssh_identity_file: entry_ssh_identity_file.text().to_string(),
+                    ssh_jump_host: entry_ssh_jump_host.text().trim().to_string(),
+                    ssh_forwards: forwards.borrow().clone(),
+                    ssh_tunnel_host: entry_ssh_tunnel_host.text().trim().to_string(),
+                    ssh_tunnel_identity_file: entry_ssh_tunnel_identity.text().trim().to_string(),
                 },
             };
 
@@ -874,7 +989,6 @@ impl ConnectionEditor {
                         }
                     };
                     on_wake(clean_mac, current_host, current_port, current_name);
-                    toast_overlay_wake.add_toast(adw::Toast::new("Wake-on-LAN packet sent"));
                 }
                 Ok(None) => {
                     toast_overlay_wake

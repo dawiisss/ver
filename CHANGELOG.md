@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.6.0] - 2026-10-31
+
+### Added
+- Pin connections with the star button on their sidebar row or <kbd>Ctrl+P</kbd>. Pinned connections are listed first, under a "Pinned" header.
+- A Recent Connections menu in the header bar lists the last five connections launched.
+- The tray menu launches pinned connections directly and recent connections from a "Recent" submenu.
+- SSH jump hosts (`ssh -J`) and local, remote and dynamic (SOCKS) port forwards for SSH connections.
+- RDP, XRDP, VNC and SPICE connections can be tunnelled through an SSH server. VER opens the tunnel in the background, starts the viewer once it is ready, and closes it when the session ends. Tunnel output appears in the session log.
+- Import `ProxyJump` and `LocalForward`/`RemoteForward`/`DynamicForward` from `~/.ssh/config`, and SSH tunnel settings from Remmina profiles.
+
+### Changed
+- Reachability for tunnelled and jump-host connections checks the first SSH hop, since the target is often unreachable directly.
+
+### Security
+- Refuse to launch any viewer for a host that starts with `-`, and reject such hosts when validating connections, so imported profiles cannot inject `vncviewer` options.
+- Store VNC password files in the per-user runtime directory (`$XDG_RUNTIME_DIR`) instead of `/tmp`.
+
+### Fixed
+- SSH config import no longer applies directives from wildcard `Host` patterns or conditional `Match` blocks to unrelated hosts. `Host *` and `Match all` still supply defaults, and `Key = value` spacing is parsed.
+- Remmina import treats `viewmode=1` as windowed and view modes 2–4 as fullscreen; the mapping was inverted.
+- Connections imported or loaded without a port now default to their protocol's port (22 for SSH, 5900 for VNC/SPICE) instead of 3389.
+- Wake-on-LAN reports send failures instead of always showing "packet sent" and polling for 30 seconds.
+- Keep the VNC password file until the viewer exits, so authentication on slow connections and reconnects no longer fails after 10 seconds. Report password file errors instead of silently launching without a password.
+- Track SSH sessions in GNOME Terminal with `--wait`. When another terminal hands the session to an already running instance, say that it cannot be tracked or disconnected instead of reporting that it ended.
+
 ## [1.5.2] - 2026-10-17
 
 ### Security

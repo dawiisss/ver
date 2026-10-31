@@ -2,7 +2,7 @@ use std::fs;
 use std::path::Path;
 
 use crate::importers::ImporterError;
-use crate::models::{AdvancedSettings, Connection, Protocol};
+use crate::models::{AdvancedSettings, Connection, Protocol, SshForward, SshForwardKind};
 
 #[derive(Default)]
 struct SshHostBlock {
@@ -11,12 +11,24 @@ struct SshHostBlock {
     user: Option<String>,
     port: Option<u16>,
     identity_file: Option<String>,
+    proxy_jump: Option<String>,
+    /// Unlike other directives, every forward that applies to a host is used.
+    forwards: Vec<SshForward>,
+}
+
+/// Which hosts the directives currently being read apply to.
+enum Scope {
+    /// Outside any block, or under `Host *` / `Match all`: applies to every host.
+    Global,
+    Host(SshHostBlock),
+    /// Under a wildcard pattern or `Match` criteria that only apply conditionally.
+    Ignored,
 }
 
 /// Parses OpenSSH config content (`~/.ssh/config`) into a list of VER `Connection`s.
 pub fn import_ssh_config_content(content: &str) -> Result<Vec<Connection>, ImporterError> {
     let mut blocks: Vec<SshHostBlock> = Vec::new();
-    let mut current_block: Option<SshHostBlock> = None;
+    let mut scope = Scope::Global;
     let mut global_defaults = SshHostBlock::default();
 
     for line in content.lines() {
@@ -25,45 +37,50 @@ pub fn import_ssh_config_content(content: &str) -> Result<Vec<Connection>, Impor
             continue;
         }
 
-        // Split key and value (separated by whitespace or '=')
-        let (key, val) = match trimmed.split_once('=') {
-            Some((k, v)) => (k.trim(), v.trim()),
-            None => match trimmed.split_once(char::is_whitespace) {
-                Some((k, v)) => (k.trim(), v.trim()),
-                None => continue,
-            },
+        // The key ends at the first whitespace or '='; the value may be preceded by " = ".
+        let (key, val) = match trimmed.split_once(|c: char| c == '=' || c.is_whitespace()) {
+            Some((k, v)) => {
+                let v = v.trim();
+                (k, v.strip_prefix('=').unwrap_or(v).trim())
+            }
+            None => continue,
         };
 
-        if key.eq_ignore_ascii_case("Host") {
-            if let Some(block) = current_block.take() {
+        let is_host = key.eq_ignore_ascii_case("Host");
+        if is_host || key.eq_ignore_ascii_case("Match") {
+            if let Scope::Host(block) = std::mem::replace(&mut scope, Scope::Ignored) {
                 blocks.push(block);
             }
 
-            let aliases: Vec<String> = val
-                .split_whitespace()
-                .map(|s| s.trim().to_string())
-                .filter(|s| !s.is_empty() && !s.contains('*') && !s.contains('?'))
-                .collect();
-
-            if aliases.is_empty() {
-                current_block = None;
-            } else {
-                current_block = Some(SshHostBlock {
-                    aliases,
-                    ..Default::default()
-                });
+            let patterns: Vec<&str> = val.split_whitespace().collect();
+            if is_host {
+                let aliases: Vec<String> = patterns
+                    .iter()
+                    .filter(|s| !s.starts_with('!') && !s.contains('*') && !s.contains('?'))
+                    .map(|s| s.to_string())
+                    .collect();
+                if !aliases.is_empty() {
+                    scope = Scope::Host(SshHostBlock {
+                        aliases,
+                        ..Default::default()
+                    });
+                } else if patterns == ["*"] {
+                    scope = Scope::Global;
+                }
+            } else if patterns.len() == 1 && patterns[0].eq_ignore_ascii_case("all") {
+                scope = Scope::Global;
             }
             continue;
         }
 
-        if let Some(ref mut block) = current_block {
-            apply_ssh_directive(block, key, val);
-        } else {
-            apply_ssh_directive(&mut global_defaults, key, val);
+        match &mut scope {
+            Scope::Global => apply_ssh_directive(&mut global_defaults, key, val),
+            Scope::Host(block) => apply_ssh_directive(block, key, val),
+            Scope::Ignored => {}
         }
     }
 
-    if let Some(block) = current_block {
+    if let Scope::Host(block) = scope {
         blocks.push(block);
     }
 
@@ -93,9 +110,21 @@ pub fn import_ssh_config_content(content: &str) -> Result<Vec<Connection>, Impor
 
         let expanded_identity = expand_tilde(&identity_file);
 
+        // `ProxyJump none` disables a jump host set by a broader section.
+        let jump_host = block
+            .proxy_jump
+            .or(global_defaults.proxy_jump.clone())
+            .filter(|jump| !jump.eq_ignore_ascii_case("none"))
+            .unwrap_or_default();
+
+        let mut forwards = block.forwards;
+        forwards.extend(global_defaults.forwards.iter().cloned());
+
         for alias in block.aliases {
             let adv = AdvancedSettings {
                 ssh_identity_file: expanded_identity.clone(),
+                ssh_jump_host: jump_host.clone(),
+                ssh_forwards: forwards.clone(),
                 ..Default::default()
             };
 
@@ -108,6 +137,7 @@ pub fn import_ssh_config_content(content: &str) -> Result<Vec<Connection>, Impor
                 username: user.clone(),
                 mac_address: String::new(),
                 group: "SSH Config".to_string(),
+                pinned: false,
                 advanced_settings: adv,
             });
         }
@@ -127,6 +157,26 @@ fn apply_ssh_directive(block: &mut SshHostBlock, key: &str, val: &str) {
         }
     } else if key.eq_ignore_ascii_case("IdentityFile") && block.identity_file.is_none() {
         block.identity_file = Some(val.to_string());
+    } else if key.eq_ignore_ascii_case("ProxyJump") && block.proxy_jump.is_none() {
+        block.proxy_jump = Some(val.to_string());
+    } else if let Some(kind) = forward_kind(key) {
+        // `LocalForward [bind:]port host:hostport`; Unix socket forwards are not supported.
+        let spec = val.split_whitespace().collect::<Vec<_>>().join(":");
+        if let Ok(forward) = SshForward::parse_spec(kind, &spec) {
+            block.forwards.push(forward);
+        }
+    }
+}
+
+fn forward_kind(key: &str) -> Option<SshForwardKind> {
+    if key.eq_ignore_ascii_case("LocalForward") {
+        Some(SshForwardKind::Local)
+    } else if key.eq_ignore_ascii_case("RemoteForward") {
+        Some(SshForwardKind::Remote)
+    } else if key.eq_ignore_ascii_case("DynamicForward") {
+        Some(SshForwardKind::Dynamic)
+    } else {
+        None
     }
 }
 

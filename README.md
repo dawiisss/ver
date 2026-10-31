@@ -33,10 +33,12 @@ wget -qO- https://raw.githubusercontent.com/dawiisss/ver/main/install.sh | bash
 - [Quick Install](#quick-install)
 - [Key Features](#key-features)
   - [Quick Connect (<kbd>Ctrl+K</kbd>)](#quick-connect-ctrlk)
+  - [Pinned & Recent Connections](#pinned--recent-connections)
   - [Host Reachability Prober & Smart Wake-on-LAN](#host-reachability-prober--smart-wake-on-lan)
   - [Import & Export Ecosystem (<kbd>Ctrl+I</kbd> / <kbd>Ctrl+E</kbd>)](#import--export-ecosystem-ctrli--ctrle)
   - [Local Network & Service Discovery (<kbd>Ctrl+D</kbd>)](#local-network--service-discovery-ctrld)
   - [Multi-Protocol Support](#multi-protocol-support)
+  - [SSH Jump Hosts, Port Forwards & Tunnels](#ssh-jump-hosts-port-forwards--tunnels)
   - [Enterprise-Grade Security](#enterprise-grade-security)
   - [Active Session Tracking & System Tray](#active-session-tracking--system-tray)
   - [Blazing Fast & Memory Efficient](#blazing-fast--memory-efficient)
@@ -60,6 +62,11 @@ wget -qO- https://raw.githubusercontent.com/dawiisss/ver/main/install.sh | bash
 * **Universal URI & Shorthand Parsing**: Connect instantly using URIs (`ssh://user@host:port`, `rdp://admin@server`, `vnc://10.0.0.5:5901`, `spice://hypervisor:5900`) or intuitive shorthands (`user@host:2222`, `host:3389`, IPv6 `[fe80::1]:22`).
 * **Live Autocomplete**: Dynamic, real-time extraction and field population for protocols, hosts, ports, and usernames as you type.
 * **Dual Execution Modes**: Launch immediately for one-off ad-hoc sessions ("Connect") or persist directly to your connection library ("Save & Connect").
+
+### Pinned & Recent Connections
+* **Pin to Top (<kbd>Ctrl+P</kbd>)**: Star a connection in the sidebar to list it under a "Pinned" header above all groups.
+* **Recent Connections**: The header bar's Recent menu lists the last five connections you launched.
+* **Launch from the Tray**: The system tray menu launches pinned connections directly and recent ones from its "Recent" submenu, without opening the main window first.
 
 ### Host Reachability Prober & Smart Wake-on-LAN
 * **Non-Blocking Reachability Status**: Asynchronous background TCP probing displays real-time connection status in the sidebar:
@@ -88,6 +95,13 @@ wget -qO- https://raw.githubusercontent.com/dawiisss/ver/main/install.sh | bash
 * **VNC**: Seamless integration with `vncviewer` with automated credential passing and color level selection.
 * **SPICE**: Hypervisor and VM streaming via `remote-viewer`, with saved credentials passed through its [stdin connection settings interface](https://gitlab.com/virt-viewer/virt-viewer/-/raw/master/man/remote-viewer.pod). Passwords are excluded from command arguments and the child environment.
 * **SSH**: Direct launch into your favorite desktop terminal emulator (`ptyxis`, `kgx`, `gnome-terminal`, `konsole`, `alacritty`, `foot`, `wezterm`, `xterm`) with custom private key identity paths (`-i`).
+
+### SSH Jump Hosts, Port Forwards & Tunnels
+* **Jump Hosts**: Reach SSH hosts through one or more bastions (`user@bastion:22`, comma separated), passed to `ssh -J`. Jump hosts authenticate with your `~/.ssh/config` and ssh-agent.
+* **Port Forwards**: Attach local (`L 8080:localhost:80`), remote (`R 9000:localhost:3000`) and SOCKS (`D 1080`) forwards to an SSH connection. They stay open while the session runs.
+* **SSH Tunnels for RDP, VNC & SPICE**: Set an SSH server on a graphical connection and VER opens `ssh -L` to it in the background, waits until it is ready, points the viewer at the local end, and closes the tunnel when the session ends. The connection's host is resolved from the SSH server, so internal names work. The tunnel cannot prompt, so it needs a key or ssh-agent, and new host keys are trusted on first use while changed keys are refused.
+* **Reachability**: Tunnelled and jump-host connections show the status of their first SSH hop.
+* **Imports**: `ProxyJump`, `LocalForward`, `RemoteForward` and `DynamicForward` are read from `~/.ssh/config`, and Remmina SSH tunnel settings are imported.
 
 ### Enterprise-Grade Security
 * **RDP Stdin Credential Hardening**: Passwords are piped over standard input via `xfreerdp3 /from-stdin:force`, eliminating credential exposure in `/proc/<pid>/cmdline` and process monitoring utilities (`ps`, `top`).
@@ -123,6 +137,7 @@ VER features comprehensive keyboard accelerators adhering to GNOME HIG standards
 | <kbd>F5</kbd> / <kbd>Ctrl</kbd> + <kbd>R</kbd> | **Refresh Reachability** status for all hosts |
 | <kbd>Return</kbd> | **Launch** selected connection |
 | <kbd>Delete</kbd> | **Delete** selected connection |
+| <kbd>Ctrl</kbd> + <kbd>P</kbd> | **Pin / Unpin** selected connection |
 | <kbd>Ctrl</kbd> + <kbd>?</kbd> / <kbd>F1</kbd> | Open **Keyboard Shortcuts** cheat sheet |
 | <kbd>Ctrl</kbd> + <kbd>Q</kbd> | **Quit** application |
 
@@ -151,7 +166,7 @@ Installs the binary to `/usr/local/bin/ver` and desktop launchers to `/usr/local
 #### Install Options & Version Pinning:
 ```bash
 # Install a specific release version
-curl -fsSL https://raw.githubusercontent.com/dawiisss/ver/main/install.sh | bash -s -- --version v1.5.2
+curl -fsSL https://raw.githubusercontent.com/dawiisss/ver/main/install.sh | bash -s -- --version v1.6.0
 
 # Install to a custom prefix directory
 ./install.sh --prefix /opt/ver

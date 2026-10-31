@@ -2,7 +2,7 @@
 set -e
 
 VERSION="${1:-$(grep '^version' Cargo.toml | head -1 | cut -d '"' -f 2)}"
-VERSION="${VERSION:-1.5.2}"
+VERSION="${VERSION:-1.6.0}"
 VERSION="${VERSION#v}"
 APP_NAME="ver"
 ARCH="amd64"

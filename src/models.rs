@@ -235,6 +235,18 @@ pub struct AdvancedSettings {
     pub rdp_hw_accel: bool,
     #[serde(default)]
     pub ssh_identity_file: String,
+    /// `ssh -J` jump hosts for SSH connections: `[user@]host[:port]`, comma separated.
+    #[serde(default)]
+    pub ssh_jump_host: String,
+    /// Port forwards opened with SSH connections.
+    #[serde(default)]
+    pub ssh_forwards: Vec<SshForward>,
+    /// SSH server (`[user@]host[:port]`) that RDP, VNC and SPICE connections are tunnelled
+    /// through. Empty connects directly.
+    #[serde(default)]
+    pub ssh_tunnel_host: String,
+    #[serde(default)]
+    pub ssh_tunnel_identity_file: String,
 }
 fn default_true() -> bool {
     true
@@ -278,8 +290,254 @@ impl Default for AdvancedSettings {
             rdp_desktop_composition: true,
             rdp_hw_accel: false,
             ssh_identity_file: String::new(),
+            ssh_jump_host: String::new(),
+            ssh_forwards: Vec::new(),
+            ssh_tunnel_host: String::new(),
+            ssh_tunnel_identity_file: String::new(),
         }
     }
+}
+
+/// Direction of an SSH port forward, matching `ssh -L`, `-R` and `-D`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum SshForwardKind {
+    #[default]
+    Local,
+    Remote,
+    Dynamic,
+}
+
+impl SshForwardKind {
+    pub fn flag(self) -> &'static str {
+        match self {
+            SshForwardKind::Local => "-L",
+            SshForwardKind::Remote => "-R",
+            SshForwardKind::Dynamic => "-D",
+        }
+    }
+}
+
+/// An SSH port forward. Dynamic (SOCKS) forwards have no destination.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct SshForward {
+    pub kind: SshForwardKind,
+    /// Listen address; empty uses ssh's default.
+    pub bind_address: String,
+    pub listen_port: u16,
+    pub dest_host: String,
+    pub dest_port: u16,
+}
+
+/// Split on ':' outside square brackets, so IPv6 addresses stay whole.
+fn split_colons(spec: &str) -> Vec<&str> {
+    let mut parts = Vec::new();
+    let mut depth = 0;
+    let mut start = 0;
+    for (i, c) in spec.char_indices() {
+        match c {
+            '[' => depth += 1,
+            ']' => depth -= 1,
+            ':' if depth == 0 => {
+                parts.push(&spec[start..i]);
+                start = i + 1;
+            }
+            _ => {}
+        }
+    }
+    parts.push(&spec[start..]);
+    parts
+}
+
+/// Bracket IPv6 literals for `ssh` forward specifications.
+fn bracket_ipv6(host: &str) -> String {
+    if host.contains(':') && !host.starts_with('[') {
+        format!("[{}]", host)
+    } else {
+        host.to_string()
+    }
+}
+
+fn parse_port(value: &str) -> Result<u16, String> {
+    match value.trim().parse::<u16>() {
+        Ok(port) if port != 0 => Ok(port),
+        _ => Err(format!("'{}' is not a port between 1 and 65535", value)),
+    }
+}
+
+/// Check a host name used in an ssh argument, which must not be read as an option.
+fn validate_ssh_host(host: &str, what: &str) -> Result<(), String> {
+    if host.is_empty() {
+        return Err(format!("{} cannot be empty", what));
+    }
+    if host.chars().any(|c| c.is_whitespace() || c.is_control()) {
+        return Err(format!("{} cannot contain whitespace", what));
+    }
+    if host.starts_with('-') {
+        return Err(format!("{} cannot start with '-'", what));
+    }
+    Ok(())
+}
+
+impl SshForward {
+    /// Parse `L|R [bind:]port:host:hostport` or `D [bind:]port`, as written for `ssh -L/-R/-D`.
+    pub fn parse(input: &str) -> Result<Self, String> {
+        let input = input.trim();
+        let (kind, spec) = input.split_once(char::is_whitespace).ok_or(
+            "Write a forward as 'L 8080:localhost:80', 'R 9000:localhost:3000' or 'D 1080'",
+        )?;
+        let kind = match kind.trim_start_matches('-').to_ascii_lowercase().as_str() {
+            "l" | "local" => SshForwardKind::Local,
+            "r" | "remote" => SshForwardKind::Remote,
+            "d" | "dynamic" | "socks" => SshForwardKind::Dynamic,
+            other => return Err(format!("Unknown forward type '{}'; use L, R or D", other)),
+        };
+        Self::parse_spec(kind, spec.trim())
+    }
+
+    /// Parse the part after the flag: `[bind:]port:host:hostport`, or `[bind:]port` for `D`.
+    pub fn parse_spec(kind: SshForwardKind, spec: &str) -> Result<Self, String> {
+        let parts = split_colons(spec);
+        let unbracket = |s: &str| s.trim_matches(['[', ']']).to_string();
+        let forward = match (kind, parts.as_slice()) {
+            (SshForwardKind::Dynamic, [port]) => Self {
+                kind,
+                listen_port: parse_port(port)?,
+                ..Default::default()
+            },
+            (SshForwardKind::Dynamic, [bind, port]) => Self {
+                kind,
+                bind_address: unbracket(bind),
+                listen_port: parse_port(port)?,
+                ..Default::default()
+            },
+            (SshForwardKind::Dynamic, _) => {
+                return Err("A dynamic forward is '[bind_address:]port'".into())
+            }
+            (_, [port, host, host_port]) => Self {
+                kind,
+                listen_port: parse_port(port)?,
+                dest_host: unbracket(host),
+                dest_port: parse_port(host_port)?,
+                ..Default::default()
+            },
+            (_, [bind, port, host, host_port]) => Self {
+                kind,
+                bind_address: unbracket(bind),
+                listen_port: parse_port(port)?,
+                dest_host: unbracket(host),
+                dest_port: parse_port(host_port)?,
+            },
+            _ => return Err("A forward is '[bind_address:]port:host:hostport'".into()),
+        };
+        forward.validate()?;
+        Ok(forward)
+    }
+
+    pub fn validate(&self) -> Result<(), String> {
+        if self.listen_port == 0 {
+            return Err("Forward listen port must be between 1 and 65535".into());
+        }
+        if !self.bind_address.is_empty() {
+            validate_ssh_host(&self.bind_address, "Forward bind address")?;
+        }
+        if self.kind != SshForwardKind::Dynamic {
+            validate_ssh_host(&self.dest_host, "Forward destination host")?;
+            if self.dest_port == 0 {
+                return Err("Forward destination port must be between 1 and 65535".into());
+            }
+        }
+        Ok(())
+    }
+
+    /// The argument that follows `flag()` on the `ssh` command line.
+    pub fn spec(&self) -> String {
+        let mut spec = if self.bind_address.is_empty() {
+            self.listen_port.to_string()
+        } else {
+            format!("{}:{}", bracket_ipv6(&self.bind_address), self.listen_port)
+        };
+        if self.kind != SshForwardKind::Dynamic {
+            spec = format!(
+                "{}:{}:{}",
+                spec,
+                bracket_ipv6(&self.dest_host),
+                self.dest_port
+            );
+        }
+        spec
+    }
+
+    /// Short description for the connection editor.
+    pub fn describe(&self) -> String {
+        let listen = if self.bind_address.is_empty() {
+            self.listen_port.to_string()
+        } else {
+            format_host_port(&self.bind_address, self.listen_port)
+        };
+        match self.kind {
+            SshForwardKind::Local => format!(
+                "Local {} → {}",
+                listen,
+                format_host_port(&self.dest_host, self.dest_port)
+            ),
+            SshForwardKind::Remote => format!(
+                "Remote {} → {}",
+                listen,
+                format_host_port(&self.dest_host, self.dest_port)
+            ),
+            SshForwardKind::Dynamic => format!("SOCKS proxy on {}", listen),
+        }
+    }
+}
+
+/// An SSH destination written as `[user@]host[:port]`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SshDestination {
+    pub user: Option<String>,
+    pub host: String,
+    pub port: Option<u16>,
+}
+
+impl SshDestination {
+    pub fn parse(input: &str) -> Result<Self, String> {
+        let input = input.trim();
+        let (user, host_port) = match input.rsplit_once('@') {
+            Some((user, rest)) if !user.is_empty() => (Some(user.to_string()), rest),
+            Some(_) => return Err(format!("'{}' has an empty user name", input)),
+            None => (None, input),
+        };
+        let (host, port) = match split_colons(host_port).as_slice() {
+            [host] => (host.to_string(), None),
+            [host, port] => (host.to_string(), Some(parse_port(port)?)),
+            // An unbracketed IPv6 address without a port.
+            _ if !host_port.starts_with('[') => (host_port.to_string(), None),
+            _ => return Err(format!("'{}' is not a valid host and port", host_port)),
+        };
+        let host = host.trim_matches(['[', ']']).to_string();
+        validate_ssh_host(&host, "SSH host")?;
+        if let Some(user) = &user {
+            validate_ssh_host(user, "SSH user name")?;
+        }
+        Ok(Self { user, host, port })
+    }
+
+    /// `user@host`, as given to `ssh` after `--`.
+    pub fn target(&self) -> String {
+        match &self.user {
+            Some(user) => format!("{}@{}", user, self.host),
+            None => self.host.clone(),
+        }
+    }
+}
+
+/// Validate a comma-separated `ssh -J` list.
+pub fn validate_jump_hosts(jumps: &str) -> Result<(), String> {
+    for hop in jumps.split(',') {
+        SshDestination::parse(hop).map_err(|e| format!("Jump host: {}", e))?;
+    }
+    Ok(())
 }
 
 impl AdvancedSettings {
@@ -317,25 +575,63 @@ fn default_group() -> String {
 
 /// Primary remote connection data model.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(from = "ConnectionRecord")]
 pub struct Connection {
-    #[serde(default = "default_id")]
     pub id: String,
-    #[serde(default = "default_name")]
     pub name: String,
-    #[serde(default)]
     pub protocol: Protocol,
-    #[serde(default)]
     pub host: String,
-    #[serde(default = "default_port")]
     pub port: u16,
-    #[serde(default)]
     pub username: String,
-    #[serde(default)]
     pub mac_address: String,
-    #[serde(default = "default_group")]
     pub group: String,
-    #[serde(default)]
+    /// Pinned connections are listed first in the sidebar and in the tray menu.
+    pub pinned: bool,
     pub advanced_settings: AdvancedSettings,
+}
+
+/// Serialized form of `Connection`, so a missing port can default from the protocol.
+#[derive(Deserialize)]
+struct ConnectionRecord {
+    #[serde(default = "default_id")]
+    id: String,
+    #[serde(default = "default_name")]
+    name: String,
+    #[serde(default)]
+    protocol: Protocol,
+    #[serde(default)]
+    host: String,
+    #[serde(default)]
+    port: Option<u16>,
+    #[serde(default)]
+    username: String,
+    #[serde(default)]
+    mac_address: String,
+    #[serde(default = "default_group")]
+    group: String,
+    #[serde(default)]
+    pinned: bool,
+    #[serde(default)]
+    advanced_settings: AdvancedSettings,
+}
+
+impl From<ConnectionRecord> for Connection {
+    fn from(record: ConnectionRecord) -> Self {
+        Self {
+            port: record
+                .port
+                .unwrap_or_else(|| record.protocol.default_port()),
+            id: record.id,
+            name: record.name,
+            protocol: record.protocol,
+            host: record.host,
+            username: record.username,
+            mac_address: record.mac_address,
+            group: record.group,
+            pinned: record.pinned,
+            advanced_settings: record.advanced_settings,
+        }
+    }
 }
 
 impl Default for Connection {
@@ -349,6 +645,7 @@ impl Default for Connection {
             username: String::new(),
             mac_address: String::new(),
             group: default_group(),
+            pinned: false,
             advanced_settings: AdvancedSettings::default(),
         }
     }
@@ -380,13 +677,49 @@ impl Connection {
         {
             return Err("Host must be a hostname or IP address without whitespace".into());
         }
+        if self.host.trim().starts_with('-') {
+            return Err("Host cannot start with '-'".into());
+        }
         if self.advanced_settings.vnc_compress_level > 9
             || self.advanced_settings.vnc_quality_level > 9
         {
             return Err("VNC compression and quality must be between 0 and 9".into());
         }
         self.validate_mac()?;
+        let adv = &self.advanced_settings;
+        if !adv.ssh_jump_host.trim().is_empty() {
+            validate_jump_hosts(adv.ssh_jump_host.trim())?;
+        }
+        if !adv.ssh_tunnel_host.trim().is_empty() {
+            SshDestination::parse(&adv.ssh_tunnel_host)
+                .map_err(|e| format!("SSH tunnel: {}", e))?;
+        }
+        for forward in &adv.ssh_forwards {
+            forward.validate()?;
+        }
         Ok(())
+    }
+
+    /// Whether this graphical connection is reached through an SSH tunnel.
+    pub fn uses_ssh_tunnel(&self) -> bool {
+        self.protocol != Protocol::Ssh && !self.advanced_settings.ssh_tunnel_host.trim().is_empty()
+    }
+
+    /// Host and port to probe for reachability: the first SSH hop when one is configured,
+    /// since the target itself is often unreachable from this machine.
+    pub fn probe_target(&self) -> (String, u16) {
+        let adv = &self.advanced_settings;
+        let first_hop = if self.uses_ssh_tunnel() {
+            Some(adv.ssh_tunnel_host.as_str())
+        } else if self.protocol == Protocol::Ssh && !adv.ssh_jump_host.trim().is_empty() {
+            adv.ssh_jump_host.split(',').next()
+        } else {
+            None
+        };
+        match first_hop.and_then(|hop| SshDestination::parse(hop).ok()) {
+            Some(dest) => (dest.host, dest.port.unwrap_or(22)),
+            None => (self.host.clone(), self.resolve_port()),
+        }
     }
 
     pub fn new() -> Self {
@@ -501,6 +834,8 @@ pub struct AppConfig {
     pub auto_connect_last: bool,
     pub default_vnc_color_level: VncColorLevel,
     pub last_connected_id: Option<String>,
+    /// Most recently launched connection IDs, newest first.
+    pub recent_connection_ids: Vec<String>,
 }
 
 impl Default for AppConfig {
@@ -511,8 +846,41 @@ impl Default for AppConfig {
             auto_connect_last: false,
             default_vnc_color_level: VncColorLevel::default(),
             last_connected_id: None,
+            recent_connection_ids: Vec::new(),
         }
     }
+}
+
+/// Number of connections kept in the recent list.
+pub const MAX_RECENT_CONNECTIONS: usize = 5;
+
+impl AppConfig {
+    /// Record a launch as the last connection and move it to the front of the recent list.
+    pub fn record_recent(&mut self, id: &str) {
+        self.last_connected_id = Some(id.to_string());
+        self.recent_connection_ids.retain(|recent| recent != id);
+        self.recent_connection_ids.insert(0, id.to_string());
+        self.recent_connection_ids.truncate(MAX_RECENT_CONNECTIONS);
+    }
+}
+
+/// Pinned connections ordered by name.
+pub fn pinned_connections(connections: &[Connection]) -> Vec<&Connection> {
+    let mut pinned: Vec<&Connection> = connections.iter().filter(|c| c.pinned).collect();
+    pinned.sort_by_cached_key(|c| c.name.to_lowercase());
+    pinned
+}
+
+/// Recently launched connections, newest first, skipping IDs that no longer exist.
+pub fn recent_connections<'a>(
+    config: &AppConfig,
+    connections: &'a [Connection],
+) -> Vec<&'a Connection> {
+    config
+        .recent_connection_ids
+        .iter()
+        .filter_map(|id| connections.iter().find(|c| &c.id == id))
+        .collect()
 }
 
 #[cfg(test)]
@@ -560,7 +928,7 @@ mod tests {
         assert_eq!(conn.name, "Production Server");
         assert_eq!(conn.protocol, Protocol::Vnc);
         assert_eq!(conn.host, "10.0.0.50");
-        assert_eq!(conn.port, 3389);
+        assert_eq!(conn.port, 5900);
         assert_eq!(conn.group, "Default");
     }
 
@@ -789,5 +1157,170 @@ mod tests {
         let settings: AdvancedSettings = serde_json::from_str(json).unwrap();
         assert!(!settings.vnc_viewonly);
         assert!(settings.vnc_clipboard);
+    }
+
+    #[test]
+    fn test_legacy_files_default_to_unpinned_without_history() {
+        let conn: Connection = serde_json::from_str(r#"{"name": "Old", "host": "h"}"#).unwrap();
+        assert!(!conn.pinned);
+        let config: AppConfig = serde_json::from_str(r#"{"last_connected_id": "a"}"#).unwrap();
+        assert!(config.recent_connection_ids.is_empty());
+        assert_eq!(config.last_connected_id.as_deref(), Some("a"));
+    }
+
+    #[test]
+    fn test_pinned_round_trips() {
+        let conn = Connection {
+            pinned: true,
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&conn).unwrap();
+        let back: Connection = serde_json::from_str(&json).unwrap();
+        assert!(back.pinned);
+    }
+
+    #[test]
+    fn test_record_recent_moves_to_front_and_caps_length() {
+        let mut config = AppConfig::default();
+        for id in ["a", "b", "c", "d", "e", "f"] {
+            config.record_recent(id);
+        }
+        assert_eq!(config.recent_connection_ids, ["f", "e", "d", "c", "b"]);
+        config.record_recent("c");
+        assert_eq!(config.recent_connection_ids, ["c", "f", "e", "d", "b"]);
+        assert_eq!(config.last_connected_id.as_deref(), Some("c"));
+    }
+
+    #[test]
+    fn test_pinned_and_recent_connection_lookups() {
+        let named = |id: &str, name: &str, pinned: bool| Connection {
+            id: id.to_string(),
+            name: name.to_string(),
+            pinned,
+            ..Default::default()
+        };
+        let connections = vec![
+            named("1", "zeta", true),
+            named("2", "Alpha", true),
+            named("3", "beta", false),
+        ];
+        let pinned: Vec<&str> = pinned_connections(&connections)
+            .iter()
+            .map(|c| c.id.as_str())
+            .collect();
+        assert_eq!(pinned, ["2", "1"]);
+
+        let config = AppConfig {
+            recent_connection_ids: vec!["3".into(), "deleted".into(), "1".into()],
+            ..Default::default()
+        };
+        let recent: Vec<&str> = recent_connections(&config, &connections)
+            .iter()
+            .map(|c| c.id.as_str())
+            .collect();
+        assert_eq!(recent, ["3", "1"]);
+    }
+
+    #[test]
+    fn test_parse_ssh_forwards() {
+        let local = SshForward::parse("L 8080:localhost:80").unwrap();
+        assert_eq!(local.kind, SshForwardKind::Local);
+        assert_eq!((local.listen_port, local.dest_port), (8080, 80));
+        assert_eq!(local.spec(), "8080:localhost:80");
+
+        let remote = SshForward::parse("-R 0.0.0.0:9000:[::1]:3000").unwrap();
+        assert_eq!(remote.kind, SshForwardKind::Remote);
+        assert_eq!(remote.bind_address, "0.0.0.0");
+        assert_eq!(remote.dest_host, "::1");
+        assert_eq!(remote.spec(), "0.0.0.0:9000:[::1]:3000");
+
+        let socks = SshForward::parse("D 1080").unwrap();
+        assert_eq!(socks.spec(), "1080");
+        assert_eq!(socks.describe(), "SOCKS proxy on 1080");
+
+        for bad in [
+            "8080:localhost:80",
+            "X 1:a:2",
+            "L 0:localhost:80",
+            "L 8080:-oProxyCommand=x:80",
+            "L 8080:localhost",
+            "D 1:2:3",
+        ] {
+            assert!(
+                SshForward::parse(bad).is_err(),
+                "{} should be rejected",
+                bad
+            );
+        }
+    }
+
+    #[test]
+    fn test_parse_ssh_destinations() {
+        let full = SshDestination::parse("admin@bastion.example:2222").unwrap();
+        assert_eq!(full.user.as_deref(), Some("admin"));
+        assert_eq!(
+            (full.host.as_str(), full.port),
+            ("bastion.example", Some(2222))
+        );
+        assert_eq!(full.target(), "admin@bastion.example");
+
+        let ipv6 = SshDestination::parse("[2001:db8::1]:22").unwrap();
+        assert_eq!((ipv6.host.as_str(), ipv6.port), ("2001:db8::1", Some(22)));
+        assert_eq!(SshDestination::parse("2001:db8::1").unwrap().port, None);
+
+        for bad in ["", "-oProxyCommand=x", "@host", "host:0", "user@bad host"] {
+            assert!(
+                SshDestination::parse(bad).is_err(),
+                "{} should be rejected",
+                bad
+            );
+        }
+        assert!(validate_jump_hosts("a@one:22,two").is_ok());
+        assert!(validate_jump_hosts("one,,two").is_err());
+    }
+
+    #[test]
+    fn test_ssh_settings_are_validated() {
+        let mut conn = Connection {
+            host: "server".into(),
+            ..Default::default()
+        };
+        conn.advanced_settings.ssh_jump_host = "-oProxyCommand=evil".into();
+        assert!(conn.validate().is_err());
+        conn.advanced_settings.ssh_jump_host.clear();
+        conn.advanced_settings.ssh_tunnel_host = "gateway:0".into();
+        assert!(conn.validate().is_err());
+        conn.advanced_settings.ssh_tunnel_host = "me@gateway".into();
+        assert!(conn.validate().is_ok());
+    }
+
+    #[test]
+    fn test_probe_target_uses_first_ssh_hop() {
+        let mut rdp = Connection {
+            protocol: Protocol::Rdp,
+            host: "10.0.0.5".into(),
+            port: 3389,
+            ..Default::default()
+        };
+        assert_eq!(rdp.probe_target(), ("10.0.0.5".into(), 3389));
+        rdp.advanced_settings.ssh_tunnel_host = "me@gateway:2222".into();
+        assert!(rdp.uses_ssh_tunnel());
+        assert_eq!(rdp.probe_target(), ("gateway".into(), 2222));
+
+        let mut ssh = Connection::new_with_protocol(Protocol::Ssh);
+        ssh.host = "internal".into();
+        ssh.advanced_settings.ssh_tunnel_host = "ignored".into();
+        assert!(!ssh.uses_ssh_tunnel());
+        ssh.advanced_settings.ssh_jump_host = "bastion,second".into();
+        assert_eq!(ssh.probe_target(), ("bastion".into(), 22));
+    }
+
+    #[test]
+    fn test_old_settings_have_no_ssh_routing() {
+        let settings: AdvancedSettings =
+            serde_json::from_str(r#"{"ssh_identity_file": "~/.ssh/id"}"#).unwrap();
+        assert!(settings.ssh_jump_host.is_empty());
+        assert!(settings.ssh_forwards.is_empty());
+        assert!(settings.ssh_tunnel_host.is_empty());
     }
 }

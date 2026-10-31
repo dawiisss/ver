@@ -172,3 +172,27 @@ fn backups_preserve_unfinished_connections() {
     assert_eq!(restored, vec![draft]);
     assert!(import_connections_json(r#"{"unrelated":"object"}"#).is_err());
 }
+
+#[test]
+fn missing_ports_default_from_the_protocol() {
+    let imported =
+        import_connections_json(r#"[{"protocol":"ssh","host":"a"},{"protocol":"vnc","host":"b"}]"#)
+            .unwrap();
+    assert_eq!(imported[0].port, 22);
+    assert_eq!(imported[1].port, 5900);
+    let explicit: Connection =
+        serde_json::from_str(r#"{"protocol":"ssh","host":"a","port":2222}"#).unwrap();
+    assert_eq!(explicit.port, 2222);
+}
+
+#[test]
+fn hosts_that_look_like_options_are_rejected() {
+    let conn = Connection {
+        host: "-SecurityTypes=None".into(),
+        protocol: Protocol::Vnc,
+        ..endpoint(5900)
+    };
+    assert!(conn.validate().is_err());
+    assert!(import_connections_json(r#"[{"protocol":"vnc","host":"-via=x"}]"#).is_err());
+    assert!(ver::launcher::launch_vnc(&conn, None).is_err());
+}

@@ -27,7 +27,48 @@ pub const STATUS_DOT_CSS: &str = "
 .status-unknown {
     background-color: #9a9996;
 }
+row:not(:hover):not(:selected) .pin-button.unpinned {
+    opacity: 0;
+}
 ";
+
+/// Header shown above pinned connections, which are listed before all groups.
+pub const PINNED_SECTION: &str = "Pinned";
+
+/// Sidebar section of a connection: pinned connections share one section ahead of the groups.
+fn section_of(conn: &Connection) -> (bool, &str) {
+    if conn.pinned {
+        (true, PINNED_SECTION)
+    } else {
+        (false, conn.group.as_str())
+    }
+}
+
+/// Sidebar order: pinned connections first, then groups, then names, ignoring case.
+pub fn compare_connections(a: &Connection, b: &Connection) -> std::cmp::Ordering {
+    b.pinned
+        .cmp(&a.pinned)
+        .then_with(|| {
+            if a.pinned {
+                std::cmp::Ordering::Equal
+            } else {
+                a.group.to_lowercase().cmp(&b.group.to_lowercase())
+            }
+        })
+        .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+}
+
+fn apply_pin_state(button: &gtk::Button, pinned: bool) {
+    if pinned {
+        button.set_icon_name("starred-symbolic");
+        button.set_tooltip_text(Some("Unpin (Ctrl+P)"));
+        button.remove_css_class("unpinned");
+    } else {
+        button.set_icon_name("non-starred-symbolic");
+        button.set_tooltip_text(Some("Pin to Top (Ctrl+P)"));
+        button.add_css_class("unpinned");
+    }
+}
 
 pub fn protocol_icon_name(proto: Protocol) -> &'static str {
     match proto {
@@ -49,25 +90,33 @@ pub fn update_connection_row(row: &gtk::ListBoxRow, conn: &Connection) {
             };
             action_row.set_subtitle(&subtitle);
 
-            let icon_name = protocol_icon_name(conn.protocol);
-            find_and_update_protocol_icon(&action_row.upcast::<gtk::Widget>(), icon_name);
+            let action_row = action_row.upcast::<gtk::Widget>();
+            if let Some(icon) = find_named_child(&action_row, "protocol_icon") {
+                if let Ok(img) = icon.downcast::<gtk::Image>() {
+                    img.set_icon_name(Some(protocol_icon_name(conn.protocol)));
+                }
+            }
+            if let Some(button) = find_named_child(&action_row, "pin_button") {
+                if let Ok(button) = button.downcast::<gtk::Button>() {
+                    apply_pin_state(&button, conn.pinned);
+                }
+            }
         }
     }
 }
 
-fn find_and_update_protocol_icon(widget: &gtk::Widget, icon_name: &str) -> bool {
-    if let Ok(img) = widget.clone().downcast::<gtk::Image>() {
-        img.set_icon_name(Some(icon_name));
-        return true;
+fn find_named_child(widget: &gtk::Widget, name: &str) -> Option<gtk::Widget> {
+    if widget.widget_name() == name {
+        return Some(widget.clone());
     }
     let mut child = widget.first_child();
     while let Some(c) = child {
-        if find_and_update_protocol_icon(&c, icon_name) {
-            return true;
+        if let Some(found) = find_named_child(&c, name) {
+            return Some(found);
         }
         child = c.next_sibling();
     }
-    false
+    None
 }
 
 pub fn create_connection_row(
@@ -110,6 +159,7 @@ pub fn create_connection_row(
     status_dot.set_tooltip_text(Some(&current_status.description()));
 
     let icon = gtk::Image::from_icon_name(icon_name);
+    icon.set_widget_name("protocol_icon");
 
     prefix_box.append(&status_dot);
     prefix_box.append(&icon);
@@ -123,6 +173,17 @@ pub fn create_connection_row(
         .build();
     active_badge.set_widget_name("active_badge");
     action_row.add_suffix(&active_badge);
+
+    // Toggles through the window's `win.toggle-pin` action, which saves the change.
+    let pin_button = gtk::Button::builder()
+        .css_classes(vec!["flat", "circular", "pin-button"])
+        .valign(gtk::Align::Center)
+        .action_name("win.toggle-pin")
+        .action_target(&conn.id.to_variant())
+        .build();
+    pin_button.set_widget_name("pin_button");
+    apply_pin_state(&pin_button, conn.pinned);
+    action_row.add_suffix(&pin_button);
 
     row.set_child(Some(&action_row));
     row
@@ -142,12 +203,12 @@ pub fn setup_group_headers(list_box: &gtk::ListBox, state: Rc<RefCell<AppWindowS
                 .cloned()
         });
 
-        let current_group = conn.map(|c| c.group.as_str()).unwrap_or("Default");
-        let prev_group = before_conn.as_ref().map(|c| c.group.as_str());
+        let current_section = conn.map(section_of).unwrap_or((false, "Default"));
+        let prev_section = before_conn.as_ref().map(section_of);
 
-        if prev_group != Some(current_group) {
+        if prev_section != Some(current_section) {
             let label = gtk::Label::builder()
-                .label(current_group)
+                .label(current_section.1)
                 .xalign(0.0)
                 .css_classes(vec!["heading", "dim-label"])
                 .margin_top(12)
@@ -175,14 +236,7 @@ pub fn setup_sorting(list_box: &gtk::ListBox, state: Rc<RefCell<AppWindowState>>
             .find(|c| c.id == row2.widget_name().as_str());
 
         match (c1, c2) {
-            (Some(a), Some(b)) => {
-                let group_cmp = a.group.to_lowercase().cmp(&b.group.to_lowercase());
-                if group_cmp != std::cmp::Ordering::Equal {
-                    group_cmp.into()
-                } else {
-                    a.name.to_lowercase().cmp(&b.name.to_lowercase()).into()
-                }
-            }
+            (Some(a), Some(b)) => compare_connections(a, b).into(),
             _ => std::cmp::Ordering::Equal.into(),
         }
     });
@@ -222,6 +276,20 @@ pub fn setup_filtering(
         list_box_clone.invalidate_filter();
         list_box_clone.invalidate_headers();
     });
+}
+
+/// The sidebar row for a connection ID, if one exists.
+pub fn find_row(list_box: &gtk::ListBox, conn_id: &str) -> Option<gtk::ListBoxRow> {
+    let mut child_opt = list_box.first_child();
+    while let Some(child) = child_opt {
+        if let Ok(row) = child.clone().downcast::<gtk::ListBoxRow>() {
+            if row.widget_name() == conn_id {
+                return Some(row);
+            }
+        }
+        child_opt = child.next_sibling();
+    }
+    None
 }
 
 pub fn find_and_set_badge(widget: &gtk::Widget, is_active: bool) -> bool {
@@ -292,5 +360,40 @@ pub fn set_row_status_dot(list_box: &gtk::ListBox, conn_id: &str, status: &HostS
             }
         }
         child_opt = child.next_sibling();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn conn(name: &str, group: &str, pinned: bool) -> Connection {
+        Connection {
+            name: name.into(),
+            group: group.into(),
+            pinned,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn pinned_connections_sort_first_by_name_across_groups() {
+        let mut list = [
+            conn("b", "Alpha", false),
+            conn("z", "Zulu", true),
+            conn("a", "Beta", false),
+            conn("C", "Alpha", true),
+        ];
+        list.sort_by(compare_connections);
+        let names: Vec<&str> = list.iter().map(|c| c.name.as_str()).collect();
+        assert_eq!(names, ["C", "z", "b", "a"]);
+    }
+
+    #[test]
+    fn pinned_section_differs_from_a_group_named_pinned() {
+        assert_ne!(
+            section_of(&conn("a", PINNED_SECTION, true)),
+            section_of(&conn("b", PINNED_SECTION, false))
+        );
     }
 }

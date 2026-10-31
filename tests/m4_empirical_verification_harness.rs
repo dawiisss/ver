@@ -151,7 +151,10 @@ fn test_terminal_emulator_path_resolution_and_stdio_flags() {
             .map(|a| a.to_string_lossy().to_string())
             .collect();
         match term {
-            "ptyxis" | "gnome-terminal" => {
+            "gnome-terminal" => {
+                assert_eq!(args, ["--wait", "--", "ssh", "--", "alice@test.server.org"]);
+            }
+            "ptyxis" => {
                 assert_eq!(args[0], "--");
                 assert_eq!(args[1], "ssh");
                 assert_eq!(args[2], "--");

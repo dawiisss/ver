@@ -90,6 +90,12 @@ const SHORTCUTS_UI: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
             </child>
             <child>
               <object class="GtkShortcutsShortcut">
+                <property name="title">Pin or Unpin Selected Connection</property>
+                <property name="accelerator">&lt;Ctrl&gt;p</property>
+              </object>
+            </child>
+            <child>
+              <object class="GtkShortcutsShortcut">
                 <property name="title">Keyboard Shortcuts Cheat Sheet</property>
                 <property name="accelerator">&lt;Ctrl&gt;question</property>
               </object>

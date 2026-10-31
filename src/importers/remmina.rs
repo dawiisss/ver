@@ -89,6 +89,42 @@ pub fn import_remmina_content(
         .cloned()
         .unwrap_or_default();
 
+    // Remmina tunnels RDP, VNC and SPICE through SSH. An empty tunnel server means the target
+    // host itself, and loopback means the viewer connects to 127.0.0.1 on the SSH server.
+    let tunnel_enabled = protocol != Protocol::Ssh
+        && props
+            .get("ssh_tunnel_enabled")
+            .map(|v| v == "1")
+            .unwrap_or(false);
+    let (ssh_identity_file, ssh_tunnel_host, ssh_tunnel_identity_file) = if tunnel_enabled {
+        let server = props
+            .get("ssh_tunnel_server")
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| host.clone());
+        let tunnel_host = match props
+            .get("ssh_tunnel_username")
+            .map(|u| u.trim())
+            .filter(|u| !u.is_empty())
+        {
+            Some(user) => format!("{}@{}", user, server),
+            None => server,
+        };
+        (String::new(), tunnel_host, ssh_key)
+    } else {
+        (ssh_key, String::new(), String::new())
+    };
+    let host = if tunnel_enabled
+        && props
+            .get("ssh_tunnel_loopback")
+            .map(|v| v == "1")
+            .unwrap_or(false)
+    {
+        "127.0.0.1".to_string()
+    } else {
+        host
+    };
+
     // Color depth
     let color_depth_val = props
         .get("colordepth")
@@ -132,7 +168,11 @@ pub fn import_remmina_content(
             .get("force_multimon")
             .map(|v| v == "1")
             .unwrap_or(false);
-    let fullscreen = props.get("viewmode").map(|v| v == "1").unwrap_or(false)
+    // Remmina view modes: 1 = scrolled window; 2, 3 and 4 are fullscreen variants.
+    let fullscreen = props
+        .get("viewmode")
+        .map(|v| matches!(v.as_str(), "2" | "3" | "4"))
+        .unwrap_or(false)
         || props
             .get("window_maximize")
             .map(|v| v == "1")
@@ -181,7 +221,11 @@ pub fn import_remmina_content(
         rdp_smooth_fonts: true,
         rdp_desktop_composition: true,
         rdp_hw_accel: false,
-        ssh_identity_file: ssh_key,
+        ssh_identity_file,
+        ssh_jump_host: String::new(),
+        ssh_forwards: Vec::new(),
+        ssh_tunnel_host,
+        ssh_tunnel_identity_file,
     };
 
     Ok(Connection {
@@ -193,6 +237,7 @@ pub fn import_remmina_content(
         username,
         mac_address: String::new(),
         group,
+        pinned: false,
         advanced_settings,
     })
 }

@@ -146,7 +146,7 @@ pub fn import_rdp_content(
         rdp_smooth_fonts: true,
         rdp_desktop_composition: true,
         rdp_hw_accel: false,
-        ssh_identity_file: String::new(),
+        ..Default::default()
     };
 
     Ok(Connection {
@@ -158,6 +158,7 @@ pub fn import_rdp_content(
         username,
         mac_address: String::new(),
         group: "RDP Files".to_string(),
+        pinned: false,
         advanced_settings,
     })
 }

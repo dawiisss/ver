@@ -5,17 +5,18 @@ use gtk::prelude::*;
 use libadwaita as adw;
 use libadwaita::prelude::*;
 use std::cell::{Cell, RefCell};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::rc::Rc;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 use crate::importers::{merge_imported_connections, ImportConflictStrategy};
-use crate::models::{AppConfig, Connection, Protocol};
+use crate::models::{recent_connections, AppConfig, Connection, Protocol};
 use crate::network;
 use crate::prober::{self, HostStatus};
 use crate::secrets;
 use crate::storage;
+use crate::tray;
 use crate::ui::discovery::{DiscoveredService, DiscoveryDialog};
 use crate::ui::editor::ConnectionEditor;
 use crate::ui::export_dialog::ExportDialog;
@@ -25,8 +26,8 @@ use crate::ui::quick_connect::QuickConnectDialog;
 use crate::ui::session::{self, ActiveSession};
 use crate::ui::shortcuts::ShortcutsDialog;
 use crate::ui::sidebar::{
-    create_connection_row, set_row_status_dot, setup_filtering, setup_group_headers, setup_sorting,
-    update_connection_row, STATUS_DOT_CSS,
+    create_connection_row, find_row, set_row_status_dot, setup_filtering, setup_group_headers,
+    setup_sorting, update_connection_row, STATUS_DOT_CSS,
 };
 
 pub struct AppWindowState {
@@ -36,6 +37,8 @@ pub struct AppWindowState {
     pub config: AppConfig,
     pub active_sessions: HashMap<String, ActiveSession>,
     pub host_statuses: HashMap<String, HostStatus>,
+    /// Connections whose SSH tunnel is still opening.
+    pub pending_tunnels: HashSet<String>,
 }
 
 pub struct MainWindow {
@@ -53,7 +56,11 @@ fn commit_connections<T>(
 ) -> Option<T> {
     let result = storage::update_connections(&mut state.borrow_mut().connections, update);
     match result {
-        Ok(value) => Some(value),
+        Ok(value) => {
+            let st = state.borrow();
+            tray::update_launch_menu(&st.config, &st.connections);
+            Some(value)
+        }
         Err(error) => {
             toast.add_toast(adw::Toast::new(&format!(
                 "Connections were not saved: {:#}",
@@ -175,6 +182,7 @@ impl MainWindow {
             config,
             active_sessions: HashMap::new(),
             host_statuses: HashMap::new(),
+            pending_tunnels: HashSet::new(),
         }));
 
         let window_title = adw::WindowTitle::builder()
@@ -197,6 +205,13 @@ impl MainWindow {
             .tooltip_text("Quick Connect (Ctrl+K)")
             .build();
 
+        let recent_menu = gio::Menu::new();
+        let recent_btn = gtk::MenuButton::builder()
+            .icon_name("document-open-recent-symbolic")
+            .tooltip_text("Recent Connections")
+            .menu_model(&recent_menu)
+            .build();
+
         let search_toggle = gtk::ToggleButton::builder()
             .icon_name("system-search-symbolic")
             .tooltip_text("Search Connections (Ctrl+F)")
@@ -204,6 +219,7 @@ impl MainWindow {
 
         header_bar.pack_start(&add_btn);
         header_bar.pack_start(&quick_btn);
+        header_bar.pack_start(&recent_btn);
         header_bar.pack_start(&search_toggle);
 
         // End pack buttons
@@ -424,7 +440,10 @@ impl MainWindow {
                     let st = state_for_probe.borrow();
                     st.connections
                         .iter()
-                        .map(|c| (c.id.clone(), c.host.clone(), c.resolve_port()))
+                        .map(|c| {
+                            let (host, port) = c.probe_target();
+                            (c.id.clone(), host, port)
+                        })
                         .collect()
                 };
 
@@ -672,7 +691,12 @@ impl MainWindow {
 
             let state_for_close = state_for_prefs.clone();
             prefs_dialog.connect_close_request(move |_| {
-                state_for_close.borrow_mut().config = config_rc.borrow().clone();
+                let mut config = config_rc.borrow().clone();
+                let mut st = state_for_close.borrow_mut();
+                // Connections launched from the tray while Preferences was open stay recent.
+                config.last_connected_id = st.config.last_connected_id.clone();
+                config.recent_connection_ids = st.config.recent_connection_ids.clone();
+                st.config = config;
                 gtk::glib::Propagation::Proceed
             });
 
@@ -876,7 +900,11 @@ impl MainWindow {
                         let list_box_on_save = list_box_for_select.clone();
                         let toast_on_save = toast_overlay_for_select.clone();
                         let row_on_save = row.clone();
-                        let on_save = move |updated_conn: Connection, updated_pass: String| {
+                        let on_save = move |mut updated_conn: Connection, updated_pass: String| {
+                            // The pin may have been toggled since this editor was opened.
+                            if let Some(current) = state_on_save.borrow().connections.iter().find(|c| c.id == updated_conn.id) {
+                                updated_conn.pinned = current.pinned;
+                            }
                             if commit_connections(&state_on_save, &toast_on_save, |connections| {
                                 if let Some(c) = connections.iter_mut().find(|c| c.id == updated_conn.id) {
                                     *c = updated_conn.clone();
@@ -908,8 +936,7 @@ impl MainWindow {
 
                             update_connection_row(&row_on_save, &updated_conn);
 
-                            let host_probe = updated_conn.host.clone();
-                            let port_probe = updated_conn.resolve_port();
+                            let (host_probe, port_probe) = updated_conn.probe_target();
                             let id_probe = updated_conn.id.clone();
                             let state_probe = state_on_save.clone();
                             let list_box_probe = list_box_on_save.clone();
@@ -941,7 +968,8 @@ impl MainWindow {
                         let window_title_on_dup = window_title_for_select.clone();
                         let toast_on_dup = toast_overlay_for_select.clone();
                         let create_row_on_dup = create_row_for_select.clone();
-                        let on_duplicate = move |dup_conn: Connection, dup_pass: String| {
+                        let on_duplicate = move |mut dup_conn: Connection, dup_pass: String| {
+                            dup_conn.pinned = false;
                             if commit_connections(&state_on_dup, &toast_on_dup, |connections| {
                                 connections.push(dup_conn.clone())
                             })
@@ -1008,12 +1036,19 @@ impl MainWindow {
 
                         let on_wake =
                             move |mac: String, target_host: String, target_port: u16, target_name: String| {
-                                let _ = network::send_wol(&mac);
+                                let toast_poll = toast_on_wake.clone();
+                                if let Err(error) = network::send_wol(&mac) {
+                                    toast_poll.add_toast(adw::Toast::new(&format!(
+                                        "Wake-on-LAN packet was not sent: {}",
+                                        error
+                                    )));
+                                    return;
+                                }
+                                toast_poll.add_toast(adw::Toast::new("Wake-on-LAN packet sent"));
                                 let target_id = conn_for_wake.id.clone();
 
                                 let state_poll = state_on_wake.clone();
                                 let list_box_poll = list_box_on_wake.clone();
-                                let toast_poll = toast_on_wake.clone();
 
                                 // Set probing status immediately
                                 state_poll
@@ -1162,6 +1197,13 @@ impl MainWindow {
                         probe_key();
                         return glib::Propagation::Stop;
                     }
+                    gdk::Key::p | gdk::Key::P => {
+                        if let Some(sel_row) = list_box_key.selected_row() {
+                            let id = sel_row.widget_name().to_string();
+                            ActionGroupExt::activate_action(&window_key, "toggle-pin", Some(&id.to_variant()));
+                        }
+                        return glib::Propagation::Stop;
+                    }
                     gdk::Key::q | gdk::Key::Q => {
                         app_key.quit();
                         return glib::Propagation::Stop;
@@ -1271,6 +1313,95 @@ impl MainWindow {
         });
         window.add_controller(key_controller);
 
+        // Pin toggling, used by the row star buttons and Ctrl+P
+        let toggle_pin_action = gio::SimpleAction::new("toggle-pin", Some(glib::VariantTy::STRING));
+        let state_for_pin = state.clone();
+        let list_box_for_pin = list_box.clone();
+        let toast_overlay_for_pin = toast_overlay.clone();
+        toggle_pin_action.connect_activate(move |_, param| {
+            let Some(id) = param.and_then(|p| p.get::<String>()) else {
+                return;
+            };
+            let updated =
+                commit_connections(&state_for_pin, &toast_overlay_for_pin, |connections| {
+                    connections.iter_mut().find(|c| c.id == id).map(|c| {
+                        c.pinned = !c.pinned;
+                        c.clone()
+                    })
+                })
+                .flatten();
+            if let Some(conn) = updated {
+                if let Some(row) = find_row(&list_box_for_pin, &conn.id) {
+                    update_connection_row(&row, &conn);
+                }
+                list_box_for_pin.invalidate_sort();
+                list_box_for_pin.invalidate_headers();
+            }
+        });
+        window.add_action(&toggle_pin_action);
+
+        // Launch by ID, used by the Recent menu and the tray menu
+        let launch_action =
+            gio::SimpleAction::new("launch-connection", Some(glib::VariantTy::STRING));
+        let state_for_launch_action = state.clone();
+        let list_box_for_launch_action = list_box.clone();
+        let toast_overlay_for_launch_action = toast_overlay.clone();
+        let launch_session_for_action = launch_session.clone();
+        launch_action.connect_activate(move |_, param| {
+            let Some(id) = param.and_then(|p| p.get::<String>()) else {
+                return;
+            };
+            let conn_opt = state_for_launch_action
+                .borrow()
+                .connections
+                .iter()
+                .find(|c| c.id == id)
+                .cloned();
+            let Some(conn) = conn_opt else {
+                toast_overlay_for_launch_action
+                    .add_toast(adw::Toast::new("That connection no longer exists"));
+                return;
+            };
+            if let Some(row) = find_row(&list_box_for_launch_action, &conn.id) {
+                list_box_for_launch_action.select_row(Some(&row));
+            }
+            launch_with_stored_password(
+                conn,
+                launch_session_for_action.clone(),
+                &toast_overlay_for_launch_action,
+            );
+        });
+        window.add_action(&launch_action);
+
+        // Placeholder shown as insensitive when there is no launch history
+        let no_recent_action = gio::SimpleAction::new("no-recent", None);
+        no_recent_action.set_enabled(false);
+        window.add_action(&no_recent_action);
+
+        // Rebuild the Recent menu each time it opens
+        let state_for_recent = state.clone();
+        recent_btn.set_create_popup_func(move |_| {
+            recent_menu.remove_all();
+            let st = state_for_recent.borrow();
+            let recent = recent_connections(&st.config, &st.connections);
+            if recent.is_empty() {
+                recent_menu.append(Some("No Recent Connections"), Some("win.no-recent"));
+            }
+            for conn in recent {
+                let item = gio::MenuItem::new(Some(&tray::menu_label(&conn.name)), None);
+                item.set_action_and_target_value(
+                    Some("win.launch-connection"),
+                    Some(&conn.id.to_variant()),
+                );
+                recent_menu.append_item(&item);
+            }
+        });
+
+        {
+            let st = state.borrow();
+            tray::update_launch_menu(&st.config, &st.connections);
+        }
+
         // Auto-connect Last Session on startup
         let auto_connect_target = {
             let st = state.borrow();
@@ -1285,15 +1416,8 @@ impl MainWindow {
         };
 
         if let Some(conn) = auto_connect_target {
-            let mut child_opt = list_box.first_child();
-            while let Some(child) = child_opt {
-                if let Ok(row) = child.clone().downcast::<gtk::ListBoxRow>() {
-                    if row.widget_name() == conn.id.as_str() {
-                        list_box.select_row(Some(&row));
-                        break;
-                    }
-                }
-                child_opt = child.next_sibling();
+            if let Some(row) = find_row(&list_box, &conn.id) {
+                list_box.select_row(Some(&row));
             }
 
             launch_with_stored_password(conn, launch_session.clone(), &toast_overlay);
